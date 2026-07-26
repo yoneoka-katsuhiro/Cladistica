@@ -60,7 +60,7 @@ control codes. Add `--no-progress` to disable the display.
 ```bash
 bash run_cladistica.sh run \
   --genus Hymenasplenium \
-  --outgroup "Asplenium setoi" "Asplenium obliquissimum" \
+  --outgroup "Asplenium setoi" "Asplenium nidus" \
   --email "your.email@example.com" \
   --bootstrap 1000 \
   --ngen 1000000
@@ -119,7 +119,7 @@ partition.
 ```bash
 bash run_cladistica.sh survey \
   --genus Hymenasplenium \
-  --outgroup "Asplenium setoi" "Asplenium obliquissimum" \
+  --outgroup "Asplenium setoi" "Asplenium nidus" \
   --email "your.email@example.com"
 ```
 
@@ -234,6 +234,21 @@ temporary directory and are summarized into `summly.txt` and `run.log`.
 
 Open both `run1.p` and `run2.p` in Tracer. Check trace stationarity and ESS for
 each parameter before using the BI tree in a publication.
+
+## Citation Guidance
+
+Analyses produced with Cladistica may use public sequence records and external
+phylogenetic software. For manuscripts, cite the sequence accessions or datasets
+you used and the external tools actually run by your analysis. See
+`CITATIONS.md` for suggested references.
+
+At minimum, check whether your workflow used:
+
+- NCBI GenBank / E-utilities for accession discovery and sequence retrieval;
+- MUSCLE for marker-wise multiple sequence alignment;
+- IQ-TREE and ModelFinder for model selection and maximum-likelihood inference;
+- MrBayes for Bayesian inference;
+- Biopython for GenBank parsing and sequence handling.
 
 ## Low-level pipelines
 
