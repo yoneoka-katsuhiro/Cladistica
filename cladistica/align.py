@@ -136,10 +136,6 @@ def align_by_marker(
                 )
             continue
         valid = OrderedDict((header, sequence.upper().replace(" ", "")) for header, sequence in records.items() if sequence.strip())
-        if progress:
-            progress.feed(marker)
-            for header, sequence in valid.items():
-                progress.feed_sequence(header, sequence)
         if len(valid) != len(records):
             rejected_rows.append({"marker": marker, "sample_id": "", "reason": "empty_sequence"})
         write_fasta(combined_path, valid)

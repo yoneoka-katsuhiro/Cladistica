@@ -80,12 +80,9 @@ def download_fasta_from_accession_table(
     warnings: list[str] = []
 
     for row in rows:
-        if progress:
-            progress.feed(row.get("taxon", ""), row.get("sample_id", ""))
         for marker_name in marker_names:
             for accession in split_accessions(row.get(marker_name, "")):
                 if progress:
-                    progress.feed(marker_name, accession)
                     progress.update("download", f"{marker_name}: {accession}")
                 existing_records = fasta_by_marker[marker_name]
                 header = sample_header(row, marker_name, accession)
@@ -102,8 +99,6 @@ def download_fasta_from_accession_table(
                     record = fetch_one_genbank(accession, email=email, api_key=api_key)
                     extracted = extract_marker_sequence(record, marker_defs[marker_name])
                     existing_records[header] = extracted.sequence
-                    if progress:
-                        progress.feed_sequence(header, extracted.sequence)
                     log_rows.append(
                         {
                             "taxon": row.get("taxon", ""),

@@ -3,17 +3,7 @@ from __future__ import annotations
 import io
 import unittest
 
-from cladistica.cli import build_parser
-from cladistica.progress import (
-    ANIMATION_INTERVAL_SECONDS,
-    DEFAULT_STAGE_ITEMS,
-    STREAM_HEIGHT,
-    STREAM_WIDTH,
-    PipelineProgress,
-    StreamLane,
-    normalize_stream_item,
-    sequence_windows,
-)
+from cladistica.progress import PipelineProgress
 
 
 class TTYBuffer(io.StringIO):
@@ -22,112 +12,61 @@ class TTYBuffer(io.StringIO):
 
 
 class ProgressTests(unittest.TestCase):
-    def test_demo_command_can_preview_detected_failure(self) -> None:
-        args = build_parser().parse_args(["demo", "--fail", "--duration", "3"])
-        self.assertTrue(args.fail)
-        self.assertEqual(args.duration, 3)
-
-    def test_stream_uses_a_fixed_five_by_forty_canvas(self) -> None:
-        progress = PipelineProgress([("align", "Alignment")], stream=io.StringIO())
-        progress.feed("Hymenasplenium hondoense")
-        progress._initialize_lanes()
-        canvas = progress._stream_canvas()
-        self.assertEqual(len(canvas), STREAM_HEIGHT)
-        self.assertTrue(all(len(row) == STREAM_WIDTH for row in canvas))
-
-    def test_stage_change_replaces_lanes_with_stage_specific_vocabulary(self) -> None:
-        progress = PipelineProgress(
-            [("accessions", "Accessions"), ("model", "ModelFinder")],
-            stream=TTYBuffer(),
-        )
-        progress.feed("Hymenasplenium hondoense")
-        progress._initialize_lanes()
-        progress.start("model", "testing models")
-        self.assertEqual(progress._active_key, "model")
-        self.assertEqual(progress._lanes[0].text, "ModelFinder")
-        self.assertIn("GTR", DEFAULT_STAGE_ITEMS["model"])
-        self.assertIn("DDBJ", DEFAULT_STAGE_ITEMS["accessions"])
-
     def test_progress_bar_shows_percentage_and_short_stage_name(self) -> None:
         stream = TTYBuffer()
         progress = PipelineProgress([("model", "ModelFinder")], stream=stream)
-        progress._initialize_lanes()
         progress.set_progress("model", 75)
         self.assertIn(
             "[========================--------]  75% ModelFinder",
             stream.getvalue(),
         )
 
-    def test_text_moves_from_left_to_right(self) -> None:
-        progress = PipelineProgress([("align", "Alignment")], stream=io.StringIO())
-        progress._lanes = [
-            StreamLane("Hymenasplenium hondoense", row - 8)
-            for row in range(STREAM_HEIGHT)
-        ]
-        positions_before = [lane.x for lane in progress._lanes]
-        progress._advance_stream()
-        self.assertEqual(
-            [lane.x for lane in progress._lanes],
-            [position + 1 for position in positions_before],
+    def test_approximate_progress_has_tilde(self) -> None:
+        stream = TTYBuffer()
+        progress = PipelineProgress([("ml", "ML tree search")], stream=stream)
+        progress.set_progress("ml", 25, "candidate trees", approximate=True)
+        self.assertIn(
+            "[========------------------------] ~25% ML tree search - candidate trees",
+            stream.getvalue(),
         )
 
-    def test_sequence_windows_show_real_bases_without_loading_whole_alignment(self) -> None:
-        sequence = "A" * 40 + "C" * 40 + "G" * 40 + "T" * 40
-        windows = sequence_windows(sequence)
-        self.assertEqual(len(windows), 3)
-        self.assertTrue(all(len(window) == STREAM_WIDTH for window in windows))
-        self.assertEqual(sequence_windows("ACGTN"), ["ACGTN"])
+    def test_interactive_output_has_no_animation_or_ansi_cursor_control(self) -> None:
+        stream = TTYBuffer()
+        with PipelineProgress([("align", "MUSCLE alignment")], stream=stream) as progress:
+            progress.start("align", "rbcL")
+            progress.set_progress("align", 50, "1/2 markers")
+            progress.succeed("align", "2 marker alignments")
 
-    def test_failure_breaks_visible_text_into_falling_particles(self) -> None:
-        progress = PipelineProgress(
-            [("align", "Alignment")],
-            stream=TTYBuffer(),
-        )
-        progress._lanes = [
-            StreamLane(f"Taxon_{row}", row * 3)
-            for row in range(STREAM_HEIGHT)
-        ]
-        visible_characters = sum(
-            character != " "
-            for row in progress._stream_canvas()
-            for character in row
-        )
-        progress.fail("align", "process stopped")
-        self.assertTrue(progress._falling)
-        for _ in range(20):
-            progress._frame += 1
-            progress._advance_fall()
-        fallen_characters = sum(
-            character != " "
-            for row in progress._particles or []
-            for character in row
-        )
-        bottom_characters = sum(
-            character != " " for character in (progress._particles or [[]])[-1]
-        )
-        self.assertEqual(fallen_characters, visible_characters)
-        self.assertGreater(bottom_characters, 0)
+        output = stream.getvalue()
+        self.assertNotIn("\x1b", output)
+        self.assertNotIn("Sequence stream", output)
+        self.assertNotIn("+----------------------------------------+", output)
+        self.assertFalse(hasattr(progress, "_thread"))
+        self.assertTrue(output.endswith("\n"))
 
-    def test_keyboard_interrupt_also_starts_character_collapse(self) -> None:
-        progress = PipelineProgress(
-            [("align", "Alignment")],
-            stream=TTYBuffer(),
-        )
-        progress._initialize_lanes()
+    def test_repeated_updates_at_same_integer_percent_are_suppressed(self) -> None:
+        stream = TTYBuffer()
+        progress = PipelineProgress([("bi", "MrBayes MCMC")], stream=stream)
+        progress.start("bi")
+        initial_length = len(stream.getvalue())
+        for generation in range(1, 10):
+            progress.set_progress(
+                "bi",
+                generation / 100,
+                f"{generation}/10,000 generations",
+            )
+        self.assertEqual(len(stream.getvalue()), initial_length)
+        progress.set_progress("bi", 1, "100/10,000 generations")
+        self.assertGreater(len(stream.getvalue()), initial_length)
+
+    def test_keyboard_interrupt_marks_active_stage_failed_without_animation(self) -> None:
+        stream = TTYBuffer()
+        progress = PipelineProgress([("align", "Alignment")], stream=stream)
         progress.start("align")
         progress.__exit__(KeyboardInterrupt, KeyboardInterrupt(), None)
-        self.assertTrue(progress._falling)
         self.assertEqual(progress.stages["align"].state, "failed")
-
-    def test_animation_rate_is_lightweight(self) -> None:
-        self.assertGreaterEqual(ANIMATION_INTERVAL_SECONDS, 0.08)
-        self.assertLessEqual(ANIMATION_INTERVAL_SECONDS, 0.12)
-
-    def test_stream_item_removes_terminal_control_characters(self) -> None:
-        self.assertEqual(
-            normalize_stream_item("\x1b Hymenasplenium   hondoense "),
-            "Hymenasplenium hondoense",
-        )
+        self.assertIn("!0% Alignment", stream.getvalue())
+        self.assertNotIn("\x1b", stream.getvalue())
 
     def test_non_tty_progress_uses_plain_status_lines(self) -> None:
         stream = io.StringIO()
@@ -143,6 +82,14 @@ class ProgressTests(unittest.TestCase):
         self.assertIn("[>>] MUSCLE marker alignments: rbcL: 4 sequences", output)
         self.assertIn("[OK] MUSCLE marker alignments: 1 marker alignment", output)
         self.assertIn("[--] ML tree: Skipped by option", output)
+
+    def test_disabled_progress_writes_nothing(self) -> None:
+        stream = TTYBuffer()
+        with PipelineProgress([("model", "ModelFinder")], enabled=False, stream=stream) as progress:
+            progress.start("model")
+            progress.set_progress("model", 75)
+            progress.succeed("model")
+        self.assertEqual(stream.getvalue(), "")
 
 
 if __name__ == "__main__":

@@ -92,8 +92,6 @@ def concatenate_alignments(
                 chunks.append(sequence)
                 row[marker] = "present"
         concatenated[sample] = "".join(chunks)
-        if progress:
-            progress.feed_sequence(sample, concatenated[sample])
         presence_rows.append(row)
 
     partitions: list[dict[str, object]] = []

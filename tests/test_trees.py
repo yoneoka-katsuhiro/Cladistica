@@ -69,7 +69,6 @@ class TreeRunnerTests(unittest.TestCase):
         self.assertEqual(progress.stages["model"].percent, 100)
         self.assertEqual(progress.stages["bootstrap"].percent, 100)
         self.assertEqual(progress.stages["ml"].percent, 100)
-        self.assertIn("GTR+F+I+G4", progress._stage_items["model"])
 
     def test_mrbayes_log_parser_uses_exact_generation_percentage(self) -> None:
         progress = PipelineProgress(

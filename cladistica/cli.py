@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import time
 from pathlib import Path
 
 from . import __version__
@@ -146,7 +145,7 @@ def add_inference_arguments(parser: argparse.ArgumentParser, *, include_program_
 
 
 def add_progress_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--no-progress", action="store_true", help="Disable the animated progress display.")
+    parser.add_argument("--no-progress", action="store_true", help="Disable progress-bar output.")
 
 
 def progress_display(args: argparse.Namespace, stages: list[tuple[str, str]]) -> PipelineProgress:
@@ -168,62 +167,6 @@ def cmd_examples(args: argparse.Namespace) -> int:
         print(title)
         print(text)
         print()
-    return 0
-
-
-def cmd_demo(args: argparse.Namespace) -> int:
-    stages = [
-        ("survey", "NCBI survey"),
-        ("download", "Sequence download"),
-        ("align", "MUSCLE marker alignments"),
-        ("model", "ModelFinder"),
-        ("bootstrap", "Bootstrap replicates"),
-        ("ml", "ML tree search"),
-        ("bi", "MrBayes BI"),
-        ("bi_summary", "BI summary and consensus"),
-    ]
-    pause = max(args.duration / (len(stages) * 5 + 1), 0.08)
-    progress = PipelineProgress(stages)
-    progress.feed(
-        "Hymenasplenium hondoense",
-        "Hymenasplenium obliquissimum",
-        "Asplenium setoi",
-        "rbcL",
-        "matK",
-        "NC_035840.1",
-    )
-    progress.feed_sequence(
-        "H. hondoense | rbcL",
-        "ATGTCACCACAAACAGAGACTAAAGCAAGTGTTGGATTCAAAGCTGGTGTTAAAGATTATAAATTG",
-    )
-    with progress:
-        time.sleep(pause)
-        for key, _ in stages:
-            progress.start(key)
-            for percent in (0, 25, 50, 75):
-                if key == "bootstrap":
-                    detail = f"{percent * 10}/1000 replicates"
-                elif key == "bi":
-                    detail = f"{percent * 10_000:,}/1,000,000 generations"
-                elif key == "model":
-                    detail = f"{max(1, percent // 5)} candidates"
-                else:
-                    detail = ""
-                progress.set_progress(
-                    key,
-                    percent,
-                    detail,
-                    approximate=key in {"model", "ml", "bi_summary"},
-                )
-                time.sleep(pause)
-                if args.fail and key == "align" and percent == 50:
-                    progress.fail(key, "process stopped")
-                    time.sleep(max(pause * 2, 1.0))
-                    break
-            if args.fail and key == "align":
-                break
-            progress.succeed(key, "done")
-            time.sleep(pause)
     return 0
 
 
@@ -483,20 +426,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     examples = subparsers.add_parser("examples", help="Show four recommended usage examples.")
     examples.set_defaults(func=cmd_examples)
-
-    demo = subparsers.add_parser("demo", help="Preview the sequence-stream terminal animation.")
-    demo.add_argument(
-        "--duration",
-        type=float,
-        default=15.0,
-        help="Approximate demo duration in seconds. Default: 15.",
-    )
-    demo.add_argument(
-        "--fail",
-        action="store_true",
-        help="Demonstrate character collapse after a detected analysis failure.",
-    )
-    demo.set_defaults(func=cmd_demo)
 
     survey = subparsers.add_parser("survey", help="Stop after writing accession_all.csv.")
     survey.add_argument("--genus", required=True, help="Target genus, e.g. Hymenasplenium.")

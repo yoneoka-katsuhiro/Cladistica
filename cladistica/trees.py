@@ -184,8 +184,6 @@ class IQTreeProgressParser:
             model_match = re.match(r"\s*(\d+)\s+([A-Za-z0-9+_.-]+)\s+", line)
             if model_match:
                 tested = int(model_match.group(1))
-                model = model_match.group(2)
-                self.progress.feed_for("model", model)
                 denominator = max(self.candidate_total, tested + 10)
                 percent = min(92, 10 + 82 * tested / denominator)
                 self.progress.set_progress(
@@ -434,9 +432,6 @@ def run_tree_analyses(
     input_copy_dir.mkdir(parents=True, exist_ok=True)
     copied_fasta = input_copy_dir / fasta_path.name
     copied_fasta.write_text(fasta_path.read_text(encoding="utf-8"), encoding="utf-8")
-    if progress:
-        for sample, sequence in read_fasta(fasta_path).items():
-            progress.feed_sequence(sample, sequence)
     partition_file = output_dir / "00_inputs" / "iqtree_partitions.txt"
     write_iqtree_partition_file(partition_file, partitions)
     mrbayes_nexus = output_dir / "00_inputs" / "mrbayes_analysis.nex"
@@ -445,12 +440,6 @@ def run_tree_analyses(
     completed = 0
     if not dry_run and not skip_ml:
         if progress:
-            progress.feed_for(
-                "model",
-                "MFP+MERGE",
-                f"{bootstrap} bootstrap replicates",
-                *(str(row.get("marker", "")) for row in partitions),
-            )
             progress.start("model")
         ml_dir = output_dir / "02_iqtree_ml"
         ml_dir.mkdir(parents=True, exist_ok=True)
@@ -479,16 +468,6 @@ def run_tree_analyses(
         if iqtree_progress:
             iqtree_progress.finish()
         write_model_selection_summary(ml_dir / "cladistica_ml.iqtree", output_dir)
-        if progress:
-            progress.feed_for(
-                "model",
-                *(
-                    str(row.get("model", ""))
-                    for row in parse_iqtree_selected_models(
-                        ml_dir / "cladistica_ml.iqtree"
-                    )
-                ),
-            )
         completed += 1
     elif progress:
         reason = "Dry run" if dry_run else "Skipped by option"
@@ -496,13 +475,6 @@ def run_tree_analyses(
             progress.skip(key, reason)
     if not dry_run and not skip_bi:
         if progress:
-            progress.feed_for(
-                "bi",
-                f"{ngen} generations",
-                f"{nruns} independent runs",
-                f"{nchains} chains per run",
-                f"{burninfrac:.0%} burn-in",
-            )
             progress.start("bi")
         bi_dir = output_dir / "03_mrbayes"
         bi_dir.mkdir(parents=True, exist_ok=True)
