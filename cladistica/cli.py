@@ -63,24 +63,24 @@ PIPELINE_DESCRIPTIONS = {
 
 USAGE_CAPTIONS = [
     (
-        "Example 1: 自作FASTAからML・BIを一括解析",
-        "マーカー別FASTAなら `resume --fasta-dir DIR`、すでにalignment・concatenate済みなら "
+        "Example 1: NCBI登録データを確認する",
+        "`survey --genus GENUS --outgroup ... --markers rbcL trnL-F` で accession_all.csv を作成します。"
+        "まずは2領域で軽く試すのがおすすめです。",
+    ),
+    (
+        "Example 2: 手選別したaccession_selected.csvから再開する",
+        "`resume --accession-selected accession_selected.csv --accession-all accession_all.csv` で、"
+        "配列取得からML・BIまで進めます。",
+    ),
+    (
+        "Example 3: 自作FASTAからML・BIを実行する",
+        "マーカー別FASTAなら `resume --fasta-dir DIR`、連結済みalignmentなら "
         "`resume --concatenated-fasta FILE` を使います。",
     ),
     (
-        "Example 2: NCBI登録データの全容だけを確認",
-        "まずは `survey --genus GENUS --outgroup ... --markers rbcL trnL-F` の2領域から始めると軽量です。"
-        "accession_all.csv、summly.txt、run.logだけを返します。",
-    ),
-    (
-        "Example 3: 手選別したaccession_selected.csvから再開",
-        "`resume --accession-selected accession_selected.csv --accession-all accession_all.csv` で、"
-        "配列取得からML・BIまでを一括実行します。",
-    ),
-    (
-        "Example 4: Cladistica配列と自作配列を統合",
+        "Example 4: Cladistica配列と自作配列を統合する",
         "`resume --fasta-dir CLADISTICA_OUTPUT --add-fasta-dir MY_FASTA` でsample IDを照合して統合し、"
-        "alignment、concatenation、ML、BIまで進めます。同一sample IDは追加側を優先します。",
+        "alignment、concatenation、ML、BIまで進めます。",
     ),
 ]
 
@@ -162,7 +162,7 @@ def cmd_describe(args: argparse.Namespace) -> int:
 
 
 def cmd_examples(args: argparse.Namespace) -> int:
-    print(f"Cladistica v{__version__} usage captions")
+    print(f"Cladistica v{__version__} recommended examples")
     print()
     for title, text in USAGE_CAPTIONS:
         print(title)
