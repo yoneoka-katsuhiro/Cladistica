@@ -1,0 +1,2 @@
+DNA, marker_1 = 1-56
+DNA, marker_2 = 57-112
