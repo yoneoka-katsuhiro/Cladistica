@@ -117,7 +117,7 @@ def align_by_marker(
     rejected_rows: list[dict[str, object]] = []
     qc_rows: list[dict[str, object]] = []
     written = 0
-    for marker in marker_names:
+    for marker_index, marker in enumerate(marker_names, start=1):
         records, duplicates = collect_marker_records(marker, genbank_dir, user_dir)
         if progress and records:
             progress.update("align", f"{marker}: {len(records)} sequences")
@@ -128,13 +128,29 @@ def align_by_marker(
         if not records:
             rejected_rows.append({"marker": marker, "sample_id": "", "reason": "no_input_sequences"})
             qc_rows.append({"marker": marker, "records": 0, "alignment_length": "", "status": "skipped_no_input"})
+            if progress:
+                progress.set_progress(
+                    "align",
+                    marker_index * 100 / len(marker_names),
+                    f"{marker_index}/{len(marker_names)} markers",
+                )
             continue
         valid = OrderedDict((header, sequence.upper().replace(" ", "")) for header, sequence in records.items() if sequence.strip())
+        if progress:
+            progress.feed(marker)
+            for header, sequence in valid.items():
+                progress.feed_sequence(header, sequence)
         if len(valid) != len(records):
             rejected_rows.append({"marker": marker, "sample_id": "", "reason": "empty_sequence"})
         write_fasta(combined_path, valid)
         if dry_run:
             qc_rows.append({"marker": marker, "records": len(valid), "alignment_length": "", "status": "validated"})
+            if progress:
+                progress.set_progress(
+                    "align",
+                    marker_index * 100 / len(marker_names),
+                    f"{marker_index}/{len(marker_names)} markers",
+                )
             continue
         if len(valid) == 1:
             write_fasta(raw_path, valid)
@@ -143,6 +159,12 @@ def align_by_marker(
         stats = terminal_process_alignment(raw_path, aligned_path)
         qc_rows.append({"marker": marker, **stats, "status": stats["length_status"]})
         written += 1
+        if progress:
+            progress.set_progress(
+                "align",
+                marker_index * 100 / len(marker_names),
+                f"{marker_index}/{len(marker_names)} markers",
+            )
 
     write_tsv(output_dir / "qc" / "duplicate_records.tsv", duplicate_rows, ["marker", "sample_id", "kept_source", "discarded_header"])
     write_tsv(output_dir / "qc" / "rejected_before_alignment.tsv", rejected_rows, ["marker", "sample_id", "reason"])

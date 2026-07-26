@@ -1,4 +1,4 @@
-# Cladistica v0.1.0
+# Cladistica v0.1.1
 
 Cladistica is a collection of modular chloroplast DNA pipelines. It can run
 from GenBank discovery to maximum-likelihood (ML) and Bayesian-inference (BI)
@@ -35,33 +35,74 @@ command -v mb
 ## Live progress
 
 During `run`, `survey`, `resume`, and the individual analysis commands,
-Cladistica displays an animated growing flower followed by the pipeline status:
+Cladistica displays a fixed 40-column by 5-row sequence stream above the
+pipeline status:
 
 ```text
-    -- * --
-      \|/
-      / \
-  Cladistica is growing
-[OK] NCBI records and representative selection - 28 selected samples
-[>>] MUSCLE marker alignments - matK: 24 sequences
-[  ] Concatenated alignment
-[  ] ModelFinder and ML tree
-[  ] MrBayes two-run analysis
-[  ] Final output
++----------------------------------------+
+|Hymenasplenium hondoense                |
+|        NC_035840.1                     |
+|ATGTCACCACAAACAGAGACTAAAGCAAGTGTTGGATT|
+|                 rbcL                   |
+|                         Asplenium setoi|
++----------------------------------------+
+Sequence stream [RUNNING]
+[================================] 100% ModelFinder
+[========================--------]  75% Bootstrap replicates - 750/1000 replicates
+[========------------------------] ~25% ML tree search - candidate trees
+[--------------------------------]   0% MrBayes MCMC
+[--------------------------------]   0% BI summary and consensus
 ```
 
-The active marker, bootstrap count, and MrBayes generation count are shown.
-Completed stages remain marked `[OK]`. When output is redirected to a file,
+Taxon names, sample IDs, accessions, markers, and representative 40-base
+windows from the sequences actually used by the workflow move continuously
+from left to right. Whole alignments are never copied into animation memory.
+The vocabulary changes immediately at each stage:
+
+- accession survey: `NCBI GenBank`, `DDBJ`, `ENA`, `INSDC`, `Entrez`, queried taxa, markers, and accessions;
+- download and extraction: FASTA, CDS/noncoding, feature extraction, QC, and downloaded sequence windows;
+- alignment and concatenation: `MUSCLE`, marker/sample names, aligned bases, partitions, and missing data;
+- ML model selection: `JC`, `K2P`, `HKY`, `TN`, `TIM`, `TVM`, `SYM`, `GTR`, `+F`, `+I`, `+G4`, `BIC`, and models reported by IQ-TREE;
+- BI and packaging: `MrBayes`, MCMC runs/chains, convergence terms, and the final output filenames.
+
+Cladistica currently queries NCBI Entrez directly. `DDBJ` and `ENA` identify
+the other INSDC partners that exchange sequence records with GenBank; their
+appearance does not mean that separate DDBJ or ENA API queries were made.
+When Cladistica detects an exception, failed external command, or interruption,
+the visible strings break into individual characters, fall through the five
+rows, and accumulate at the bottom. This also runs when the user interrupts
+Cladistica with Control-C. Cladistica terminates the active external child
+process before presenting the collapse effect. A silent long-running IQ-TREE or MrBayes
+process remains `RUNNING`; the animation does not guess that valid computation
+has stalled.
+
+Long combined labels are split into separate `ModelFinder`, `Bootstrap
+replicates`, `ML tree search`, `MrBayes MCMC`, and `BI summary and consensus`
+rows. Bootstrap and MCMC percentages come directly from replicate and
+generation numbers in the external program output. A leading `~` marks
+phase/ETA-based estimates where the final number of iterations is not known in
+advance. When output is redirected to a file,
 Cladistica automatically switches to plain status lines without terminal
 control codes. Add `--no-progress` to disable the display.
 
-## Full Workflow
+Preview normal flow and detected-failure behavior without starting an analysis:
+
+```bash
+bash run_cladistica.sh demo
+bash run_cladistica.sh demo --fail
+```
+
+## Start Here: Lightweight Full Workflow
+
+Running the full workflow with all default markers can take time, especially
+when many accessions are found and both ML and BI are enabled. If this is your
+first run, start with the two-marker example below.
 
 ```bash
 bash run_cladistica.sh run \
   --genus Hymenasplenium \
   --outgroup "Asplenium setoi" "Asplenium nidus" \
-  --email "your.email@example.com" \
+  --markers rbcL trnL-F \
   --bootstrap 1000 \
   --ngen 1000000
 ```
@@ -70,15 +111,19 @@ The default selection is one sample per taxon. Ranking prioritizes extracted
 marker coverage, clean or CDS-QC-passing markers, publication evidence, and
 total extracted sequence length.
 
+For a broader production analysis, add more markers after confirming that the
+survey, sequence extraction, alignment, and tree inference steps work as
+expected for your taxonomic group.
+
 ## Recommended Usage Examples
 
-The same usage captions are available in the terminal:
+The same examples are available in the terminal:
 
 ```bash
 bash run_cladistica.sh examples
 ```
 
-### 1. Start From Self-Made FASTA, Then Run ML And BI
+### Example 1: Use self-made FASTA, then run ML and BI together
 
 For unaligned FASTA files separated by marker, name each file after the marker,
 for example `rbcL.fasta`, `matK.fasta`, and `trnL-F.fasta`:
@@ -114,13 +159,13 @@ bash run_cladistica.sh resume \
 Without a partition file, the concatenated alignment is analyzed as one cpDNA
 partition.
 
-### 2. Create Only `accession_all.csv` To Inspect NCBI Data
+### Example 2: Create only `accession_all.csv` to inspect NCBI records
 
 ```bash
 bash run_cladistica.sh survey \
   --genus Hymenasplenium \
   --outgroup "Asplenium setoi" "Asplenium nidus" \
-  --email "your.email@example.com"
+  --markers rbcL trnL-F
 ```
 
 `survey` pages through all matching NCBI search results by default. For a quick
@@ -139,7 +184,7 @@ representatives, unselected candidates, and rejected records with reasons. The
 `selection_status` column is a recommendation for review; `survey` does not
 continue to FASTA alignment or tree inference.
 
-### 3. Manually Select Accessions, Then Resume To Tree Inference
+### Example 3: Manually select accessions, then resume to tree inference
 
 First run `survey`. Open `accession_all.csv`, retain the desired sample rows,
 and save them as `accession_selected.csv`.
@@ -157,7 +202,6 @@ Then run:
 bash run_cladistica.sh resume \
   --accession-selected input/accession_selected.csv \
   --accession-all output/20260726_1/accession_all.csv \
-  --email "your.email@example.com" \
   --bootstrap 1000 \
   --ngen 1000000
 ```
@@ -167,7 +211,7 @@ sequences, aligns and concatenates them, and runs ML and BI. Supplying
 `--accession-all` is optional, but preserves the full survey beside the final
 selected table.
 
-### 4. Combine Cladistica FASTA With Your Own Research Sequences
+### Example 4: Combine Cladistica FASTA with your own research sequences
 
 Put the new sequences in a second marker-wise directory:
 
@@ -178,9 +222,7 @@ input/my_sequences/
   trnL-F.fasta
 ```
 
-Use the completed Cladistica output directory as the primary FASTA source. If
-you are using a low-level `accessions` output directory instead, point
-`--fasta-dir` to its `fasta_by_marker/` directory.
+Use the completed Cladistica output as the primary FASTA source:
 
 ```bash
 bash run_cladistica.sh resume \
@@ -198,6 +240,17 @@ recorded in `run.log`.
 
 The marker FASTA files returned in the final output contain the combined
 dataset, including both Cladistica and user sequences.
+
+To keep a first combined run lightweight, limit the marker set in the same way:
+
+```bash
+bash run_cladistica.sh resume \
+  --fasta-dir output/20260726_1 \
+  --add-fasta-dir input/my_sequences \
+  --markers rbcL trnL-F \
+  --bootstrap 1000 \
+  --ngen 1000000
+```
 
 ## Output
 
@@ -235,7 +288,7 @@ temporary directory and are summarized into `summly.txt` and `run.log`.
 Open both `run1.p` and `run2.p` in Tracer. Check trace stationarity and ESS for
 each parameter before using the BI tree in a publication.
 
-## Citation Guidance
+## Citation guidance
 
 Analyses produced with Cladistica may use public sequence records and external
 phylogenetic software. For manuscripts, cite the sequence accessions or datasets
@@ -262,7 +315,7 @@ bash run_cladistica.sh concat --help
 bash run_cladistica.sh tree --help
 ```
 
-Use `package` to flatten an existing working directory:
+Use `package` to flatten an older v0.1.0 or v0.1.1 working directory:
 
 ```bash
 bash run_cladistica.sh package \

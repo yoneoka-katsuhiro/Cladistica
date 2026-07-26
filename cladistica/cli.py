@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 from . import __version__
@@ -62,24 +63,33 @@ PIPELINE_DESCRIPTIONS = {
 
 USAGE_CAPTIONS = [
     (
-        "Caption 1: 自作FASTAからML・BIを一括解析",
+        "Example 1: 自作FASTAからML・BIを一括解析",
         "マーカー別FASTAなら `resume --fasta-dir DIR`、すでにalignment・concatenate済みなら "
         "`resume --concatenated-fasta FILE` を使います。",
     ),
     (
-        "Caption 2: NCBI登録データの全容だけを確認",
-        "`survey --genus GENUS --outgroup ...` を実行すると accession_all.csv、summly.txt、run.logだけを返します。",
+        "Example 2: NCBI登録データの全容だけを確認",
+        "まずは `survey --genus GENUS --outgroup ... --markers rbcL trnL-F` の2領域から始めると軽量です。"
+        "accession_all.csv、summly.txt、run.logだけを返します。",
     ),
     (
-        "Caption 3: 手選別したaccession_selected.csvから再開",
+        "Example 3: 手選別したaccession_selected.csvから再開",
         "`resume --accession-selected accession_selected.csv --accession-all accession_all.csv` で、"
         "配列取得からML・BIまでを一括実行します。",
     ),
     (
-        "Caption 4: Cladistica配列と自作配列を統合",
+        "Example 4: Cladistica配列と自作配列を統合",
         "`resume --fasta-dir CLADISTICA_OUTPUT --add-fasta-dir MY_FASTA` でsample IDを照合して統合し、"
         "alignment、concatenation、ML、BIまで進めます。同一sample IDは追加側を優先します。",
     ),
+]
+
+INFERENCE_PROGRESS_STAGES = [
+    ("model", "ModelFinder"),
+    ("bootstrap", "Bootstrap replicates"),
+    ("ml", "ML tree search"),
+    ("bi", "MrBayes MCMC"),
+    ("bi_summary", "BI summary and consensus"),
 ]
 
 
@@ -161,6 +171,62 @@ def cmd_examples(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_demo(args: argparse.Namespace) -> int:
+    stages = [
+        ("survey", "NCBI survey"),
+        ("download", "Sequence download"),
+        ("align", "MUSCLE marker alignments"),
+        ("model", "ModelFinder"),
+        ("bootstrap", "Bootstrap replicates"),
+        ("ml", "ML tree search"),
+        ("bi", "MrBayes BI"),
+        ("bi_summary", "BI summary and consensus"),
+    ]
+    pause = max(args.duration / (len(stages) * 5 + 1), 0.08)
+    progress = PipelineProgress(stages)
+    progress.feed(
+        "Hymenasplenium hondoense",
+        "Hymenasplenium obliquissimum",
+        "Asplenium setoi",
+        "rbcL",
+        "matK",
+        "NC_035840.1",
+    )
+    progress.feed_sequence(
+        "H. hondoense | rbcL",
+        "ATGTCACCACAAACAGAGACTAAAGCAAGTGTTGGATTCAAAGCTGGTGTTAAAGATTATAAATTG",
+    )
+    with progress:
+        time.sleep(pause)
+        for key, _ in stages:
+            progress.start(key)
+            for percent in (0, 25, 50, 75):
+                if key == "bootstrap":
+                    detail = f"{percent * 10}/1000 replicates"
+                elif key == "bi":
+                    detail = f"{percent * 10_000:,}/1,000,000 generations"
+                elif key == "model":
+                    detail = f"{max(1, percent // 5)} candidates"
+                else:
+                    detail = ""
+                progress.set_progress(
+                    key,
+                    percent,
+                    detail,
+                    approximate=key in {"model", "ml", "bi_summary"},
+                )
+                time.sleep(pause)
+                if args.fail and key == "align" and percent == 50:
+                    progress.fail(key, "process stopped")
+                    time.sleep(max(pause * 2, 1.0))
+                    break
+            if args.fail and key == "align":
+                break
+            progress.succeed(key, "done")
+            time.sleep(pause)
+    return 0
+
+
 def cmd_survey(args: argparse.Namespace) -> int:
     with progress_display(
         args,
@@ -204,22 +270,19 @@ def cmd_resume(args: argparse.Namespace) -> int:
             ("download", "Selected GenBank sequences"),
             ("align", "MUSCLE marker alignments"),
             ("concat", "Concatenated alignment"),
-            ("ml", "ModelFinder and ML tree"),
-            ("bi", "MrBayes two-run analysis"),
+            *INFERENCE_PROGRESS_STAGES,
             ("package", "Final output"),
         ]
     elif args.fasta_dir:
         stages = [
             ("align", "MUSCLE marker alignments"),
             ("concat", "Concatenated alignment"),
-            ("ml", "ModelFinder and ML tree"),
-            ("bi", "MrBayes two-run analysis"),
+            *INFERENCE_PROGRESS_STAGES,
             ("package", "Final output"),
         ]
     else:
         stages = [
-            ("ml", "ModelFinder and ML tree"),
-            ("bi", "MrBayes two-run analysis"),
+            *INFERENCE_PROGRESS_STAGES,
             ("package", "Final output"),
         ]
     with progress_display(args, stages) as progress:
@@ -331,7 +394,7 @@ def cmd_concat(args: argparse.Namespace) -> int:
 def cmd_tree(args: argparse.Namespace) -> int:
     with progress_display(
         args,
-        [("ml", "ModelFinder and ML tree"), ("bi", "MrBayes analysis")],
+        INFERENCE_PROGRESS_STAGES,
     ) as progress:
         result = run_tree_analyses(
             input_dir=args.input.expanduser().resolve(),
@@ -359,8 +422,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         ("accessions", "NCBI records and representative selection"),
         ("align", "MUSCLE marker alignments"),
         ("concat", "Concatenated alignment"),
-        ("ml", "ModelFinder and ML tree"),
-        ("bi", "MrBayes two-run analysis"),
+        *INFERENCE_PROGRESS_STAGES,
         ("package", "Final output"),
     ]
     with progress_display(args, stages) as progress:
@@ -419,8 +481,22 @@ def build_parser() -> argparse.ArgumentParser:
     describe = subparsers.add_parser("describe", help="Explain the default behavior of each pipeline.")
     describe.set_defaults(func=cmd_describe)
 
-    examples = subparsers.add_parser("examples", help="Show four supported partial-workflow captions.")
+    examples = subparsers.add_parser("examples", help="Show four recommended usage examples.")
     examples.set_defaults(func=cmd_examples)
+
+    demo = subparsers.add_parser("demo", help="Preview the sequence-stream terminal animation.")
+    demo.add_argument(
+        "--duration",
+        type=float,
+        default=15.0,
+        help="Approximate demo duration in seconds. Default: 15.",
+    )
+    demo.add_argument(
+        "--fail",
+        action="store_true",
+        help="Demonstrate character collapse after a detected analysis failure.",
+    )
+    demo.set_defaults(func=cmd_demo)
 
     survey = subparsers.add_parser("survey", help="Stop after writing accession_all.csv.")
     survey.add_argument("--genus", required=True, help="Target genus, e.g. Hymenasplenium.")

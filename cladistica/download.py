@@ -68,24 +68,42 @@ def download_fasta_from_accession_table(
     if not marker_names:
         raise ValueError("No requested marker columns were found in the accession table.")
     validate_selected_accessions(rows, marker_names)
+    total_downloads = sum(
+        len(split_accessions(row.get(marker_name, "")))
+        for row in rows
+        for marker_name in marker_names
+    )
+    completed_downloads = 0
 
     fasta_by_marker: dict[str, dict[str, str]] = {marker: {} for marker in marker_names}
     log_rows: list[dict[str, object]] = []
     warnings: list[str] = []
 
     for row in rows:
+        if progress:
+            progress.feed(row.get("taxon", ""), row.get("sample_id", ""))
         for marker_name in marker_names:
             for accession in split_accessions(row.get(marker_name, "")):
                 if progress:
+                    progress.feed(marker_name, accession)
                     progress.update("download", f"{marker_name}: {accession}")
                 existing_records = fasta_by_marker[marker_name]
                 header = sample_header(row, marker_name, accession)
                 if skip_existing and header in existing_records:
+                    completed_downloads += 1
+                    if progress:
+                        progress.set_progress(
+                            "download",
+                            completed_downloads * 100 / max(1, total_downloads),
+                            f"{completed_downloads}/{total_downloads} sequences",
+                        )
                     continue
                 try:
                     record = fetch_one_genbank(accession, email=email, api_key=api_key)
                     extracted = extract_marker_sequence(record, marker_defs[marker_name])
                     existing_records[header] = extracted.sequence
+                    if progress:
+                        progress.feed_sequence(header, extracted.sequence)
                     log_rows.append(
                         {
                             "taxon": row.get("taxon", ""),
@@ -120,6 +138,14 @@ def download_fasta_from_accession_table(
                             "note": message,
                         }
                     )
+                finally:
+                    completed_downloads += 1
+                    if progress:
+                        progress.set_progress(
+                            "download",
+                            completed_downloads * 100 / max(1, total_downloads),
+                            f"{completed_downloads}/{total_downloads} sequences",
+                        )
     for marker_name, records in fasta_by_marker.items():
         if records:
             write_fasta(output_dir / f"{marker_name}.fasta", records)

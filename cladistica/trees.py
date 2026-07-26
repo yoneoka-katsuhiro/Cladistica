@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 import re
 
@@ -116,12 +118,199 @@ def write_mrbayes_nexus(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run_checked(command: list[str], cwd: Path, log_path: Path) -> None:
+def stop_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def run_checked(
+    command: list[str],
+    cwd: Path,
+    log_path: Path,
+    *,
+    on_line: Callable[[str], None] | None = None,
+) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as log:
-        result = subprocess.run(command, cwd=cwd, text=True, stdout=log, stderr=subprocess.STDOUT, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f"Command failed ({result.returncode}): {' '.join(command)}. See {log_path}")
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+        )
+        try:
+            if process.stdout is None:
+                raise RuntimeError("External command output stream was not created.")
+            for raw_line in process.stdout:
+                log.write(raw_line)
+                log.flush()
+                if on_line:
+                    on_line(raw_line.rstrip())
+            returncode = process.wait()
+        except BaseException:
+            stop_process(process)
+            raise
+        finally:
+            if process.stdout:
+                process.stdout.close()
+    if returncode != 0:
+        raise RuntimeError(f"Command failed ({returncode}): {' '.join(command)}. See {log_path}")
+
+
+class IQTreeProgressParser:
+    def __init__(self, progress: PipelineProgress, bootstrap: int) -> None:
+        self.progress = progress
+        self.bootstrap = max(1, bootstrap)
+        self.phase = "model"
+        self.candidate_total = 0
+        self.bootstrap_replicate = 0
+        self.ml_started = 0.0
+
+    def __call__(self, line: str) -> None:
+        if "Selecting individual models for" in line:
+            self.progress.set_progress("model", 8, "testing partition models", approximate=True)
+        total_match = re.search(r"about\s+(\d+)\s+total partition schemes", line)
+        if total_match:
+            self.candidate_total = int(total_match.group(1))
+        if self.phase == "model":
+            model_match = re.match(r"\s*(\d+)\s+([A-Za-z0-9+_.-]+)\s+", line)
+            if model_match:
+                tested = int(model_match.group(1))
+                model = model_match.group(2)
+                self.progress.feed_for("model", model)
+                denominator = max(self.candidate_total, tested + 10)
+                percent = min(92, 10 + 82 * tested / denominator)
+                self.progress.set_progress(
+                    "model",
+                    percent,
+                    f"{tested} candidates",
+                    approximate=True,
+                )
+        if "CPU time for ModelFinder:" in line:
+            self.progress.succeed("model")
+            self.phase = "bootstrap"
+            self.progress.start("bootstrap")
+        replicate_match = re.search(r"START BOOTSTRAP REPLICATE NUMBER\s+(\d+)", line)
+        if replicate_match:
+            if self.phase == "model":
+                self.progress.succeed("model")
+                self.progress.start("bootstrap")
+            self.phase = "bootstrap"
+            self.bootstrap_replicate = int(replicate_match.group(1))
+            completed = max(0, self.bootstrap_replicate - 1)
+            self.progress.set_progress(
+                "bootstrap",
+                completed * 100 / self.bootstrap,
+                f"{completed}/{self.bootstrap} replicates",
+            )
+        if "TREE SEARCH COMPLETED" in line and self.phase == "bootstrap":
+            completed = min(self.bootstrap_replicate, self.bootstrap)
+            self.progress.set_progress(
+                "bootstrap",
+                completed * 100 / self.bootstrap,
+                f"{completed}/{self.bootstrap} replicates",
+            )
+        if "Consensus tree written to" in line:
+            self.progress.succeed("bootstrap", f"{self.bootstrap}/{self.bootstrap} replicates")
+            self.phase = "ml"
+            self.ml_started = time.monotonic()
+            self.progress.start("ml")
+        if self.phase != "ml":
+            return
+        if "INITIALIZING CANDIDATE TREE SET" in line:
+            self.progress.set_progress("ml", 25, "candidate trees", approximate=True)
+        iteration_match = re.search(r"Iteration\s+(\d+)\s+/", line)
+        if iteration_match:
+            iteration = int(iteration_match.group(1))
+            remaining_match = re.search(
+                r"\((\d+)h:(\d+)m:(\d+)s left\)",
+                line,
+            )
+            if remaining_match and self.ml_started:
+                hours, minutes, seconds = map(int, remaining_match.groups())
+                remaining = hours * 3600 + minutes * 60 + seconds
+                elapsed = max(0.1, time.monotonic() - self.ml_started)
+                percent = 100 * elapsed / (elapsed + remaining) if remaining else 88
+            else:
+                percent = 25 + min(60, iteration / 4)
+            self.progress.set_progress(
+                "ml",
+                min(88, percent),
+                f"iteration {iteration}",
+                approximate=True,
+            )
+        if "TREE SEARCH COMPLETED" in line:
+            self.progress.set_progress("ml", 92, "best tree found", approximate=True)
+        if "FINALIZING TREE SEARCH" in line:
+            self.progress.set_progress("ml", 97, "finalizing", approximate=True)
+        if "Analysis results written to:" in line:
+            self.progress.succeed("ml")
+
+    def finish(self) -> None:
+        for key in ("model", "bootstrap", "ml"):
+            stage = self.progress.stages.get(key)
+            if stage and stage.state not in {"success", "skipped"}:
+                self.progress.succeed(key)
+
+
+class MrBayesProgressParser:
+    def __init__(self, progress: PipelineProgress, ngen: int) -> None:
+        self.progress = progress
+        self.ngen = max(1, ngen)
+        self.summary_started = False
+
+    def __call__(self, line: str) -> None:
+        generation_match = re.match(r"\s*(\d+)\s+--", line)
+        if generation_match and not self.summary_started:
+            generation = min(int(generation_match.group(1)), self.ngen)
+            self.progress.set_progress(
+                "bi",
+                generation * 100 / self.ngen,
+                f"{generation:,}/{self.ngen:,} generations",
+            )
+        if "Analysis completed in" in line and not self.summary_started:
+            self.progress.succeed("bi", f"{self.ngen:,}/{self.ngen:,} generations")
+            self.summary_started = True
+            self.progress.start("bi_summary")
+            self.progress.set_progress(
+                "bi_summary",
+                10,
+                "reading traces",
+                approximate=True,
+            )
+        summary_milestones = (
+            ("Summarizing parameters in files", 35, "parameter summary"),
+            ("Model parameter summaries over the runs", 55, "convergence statistics"),
+            ("Summarizing trees in files", 70, "tree summary"),
+            ("Summary statistics for informative taxon bipartitions", 85, "bipartitions"),
+            ("Calculating tree probabilities", 95, "consensus tree"),
+        )
+        for marker, percent, detail in summary_milestones:
+            if marker in line:
+                if not self.summary_started:
+                    self.summary_started = True
+                    self.progress.start("bi_summary")
+                self.progress.set_progress(
+                    "bi_summary",
+                    percent,
+                    detail,
+                    approximate=True,
+                )
+
+    def finish(self) -> None:
+        bi_stage = self.progress.stages.get("bi")
+        if bi_stage and bi_stage.state not in {"success", "skipped"}:
+            self.progress.succeed("bi")
+        if self.progress.stages.get("bi_summary"):
+            self.progress.succeed("bi_summary")
 
 
 def parse_iqtree_selected_models(iqtree_report: Path) -> list[dict[str, object]]:
@@ -245,6 +434,9 @@ def run_tree_analyses(
     input_copy_dir.mkdir(parents=True, exist_ok=True)
     copied_fasta = input_copy_dir / fasta_path.name
     copied_fasta.write_text(fasta_path.read_text(encoding="utf-8"), encoding="utf-8")
+    if progress:
+        for sample, sequence in read_fasta(fasta_path).items():
+            progress.feed_sequence(sample, sequence)
     partition_file = output_dir / "00_inputs" / "iqtree_partitions.txt"
     write_iqtree_partition_file(partition_file, partitions)
     mrbayes_nexus = output_dir / "00_inputs" / "mrbayes_analysis.nex"
@@ -253,7 +445,13 @@ def run_tree_analyses(
     completed = 0
     if not dry_run and not skip_ml:
         if progress:
-            progress.start("ml", f"ModelFinder + {bootstrap} bootstrap replicates")
+            progress.feed_for(
+                "model",
+                "MFP+MERGE",
+                f"{bootstrap} bootstrap replicates",
+                *(str(row.get("marker", "")) for row in partitions),
+            )
+            progress.start("model")
         ml_dir = output_dir / "02_iqtree_ml"
         ml_dir.mkdir(parents=True, exist_ok=True)
         command = [
@@ -271,26 +469,59 @@ def run_tree_analyses(
             "-pre",
             str(ml_dir / "cladistica_ml"),
         ]
-        run_checked(command, output_dir, output_dir / "run_iqtree_ml.log")
+        iqtree_progress = IQTreeProgressParser(progress, bootstrap) if progress else None
+        run_checked(
+            command,
+            output_dir,
+            output_dir / "run_iqtree_ml.log",
+            on_line=iqtree_progress,
+        )
+        if iqtree_progress:
+            iqtree_progress.finish()
         write_model_selection_summary(ml_dir / "cladistica_ml.iqtree", output_dir)
-        completed += 1
         if progress:
-            progress.succeed("ml", "ML.tre created")
+            progress.feed_for(
+                "model",
+                *(
+                    str(row.get("model", ""))
+                    for row in parse_iqtree_selected_models(
+                        ml_dir / "cladistica_ml.iqtree"
+                    )
+                ),
+            )
+        completed += 1
     elif progress:
-        progress.skip("ml", "Skipped by option")
+        reason = "Dry run" if dry_run else "Skipped by option"
+        for key in ("model", "bootstrap", "ml"):
+            progress.skip(key, reason)
     if not dry_run and not skip_bi:
         if progress:
-            progress.start("bi", f"2 runs x {ngen} generations")
+            progress.feed_for(
+                "bi",
+                f"{ngen} generations",
+                f"{nruns} independent runs",
+                f"{nchains} chains per run",
+                f"{burninfrac:.0%} burn-in",
+            )
+            progress.start("bi")
         bi_dir = output_dir / "03_mrbayes"
         bi_dir.mkdir(parents=True, exist_ok=True)
         analysis_copy = bi_dir / mrbayes_nexus.name
         analysis_copy.write_text(mrbayes_nexus.read_text(encoding="utf-8"), encoding="utf-8")
-        run_checked([mrbayes or "mb", analysis_copy.name], bi_dir, output_dir / "run_mrbayes.log")
+        mrbayes_progress = MrBayesProgressParser(progress, ngen) if progress else None
+        run_checked(
+            [mrbayes or "mb", analysis_copy.name],
+            bi_dir,
+            output_dir / "run_mrbayes.log",
+            on_line=mrbayes_progress,
+        )
+        if mrbayes_progress:
+            mrbayes_progress.finish()
         completed += 1
-        if progress:
-            progress.succeed("bi", "BI.tre, run1.p, and run2.p created")
     elif progress:
-        progress.skip("bi", "Skipped by option")
+        reason = "Dry run" if dry_run else "Skipped by option"
+        for key in ("bi", "bi_summary"):
+            progress.skip(key, reason)
     copy_tree_outputs(output_dir, output_dir)
     summary = [
         "Cladistica iqtree_mrbayes_runner",

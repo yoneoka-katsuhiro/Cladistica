@@ -47,24 +47,37 @@ def concatenate_alignments(
     marker_records: dict[str, OrderedDict[str, str]] = {}
     marker_lengths: dict[str, int] = {}
     input_rows: list[dict[str, object]] = []
-    for marker in marker_names:
+    for marker_index, marker in enumerate(marker_names, start=1):
         path = marker_input_path(input_dir, marker)
         if not path:
             if strict:
                 raise FileNotFoundError(f"Missing aligned FASTA for marker: {marker}")
             input_rows.append({"marker": marker, "path": "", "records": 0, "alignment_length": "", "status": "missing_skipped"})
+            if progress:
+                progress.set_progress(
+                    "concat",
+                    marker_index * 70 / len(marker_names),
+                    f"{marker_index}/{len(marker_names)} markers read",
+                )
             continue
         records, length = read_aligned_marker(path)
         marker_records[marker] = records
         marker_lengths[marker] = length
         if progress:
             progress.update("concat", f"{marker}: {len(records)} samples x {length} bp")
+            progress.set_progress(
+                "concat",
+                marker_index * 70 / len(marker_names),
+                f"{marker_index}/{len(marker_names)} markers read",
+            )
         input_rows.append({"marker": marker, "path": str(path), "records": len(records), "alignment_length": length, "status": "loaded"})
 
     if not marker_records:
         raise ValueError("No aligned marker FASTA files were found.")
 
     samples = sorted({sample for records in marker_records.values() for sample in records})
+    if progress:
+        progress.set_progress("concat", 80, f"{len(samples)} samples", approximate=True)
     concatenated: OrderedDict[str, str] = OrderedDict()
     presence_rows: list[dict[str, object]] = []
     for sample in samples:
@@ -79,6 +92,8 @@ def concatenate_alignments(
                 chunks.append(sequence)
                 row[marker] = "present"
         concatenated[sample] = "".join(chunks)
+        if progress:
+            progress.feed_sequence(sample, concatenated[sample])
         presence_rows.append(row)
 
     partitions: list[dict[str, object]] = []

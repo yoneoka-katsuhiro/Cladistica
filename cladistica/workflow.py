@@ -201,6 +201,12 @@ def run_accession_survey(
         )
         rows, _ = read_table(accessions_dir / "accession_all.csv")
         if progress:
+            for row in rows:
+                progress.feed(
+                    row.get("taxon", ""),
+                    row.get("sample_id", ""),
+                    row.get("source_record_ids", ""),
+                )
             progress.succeed("accessions", f"{len(rows)} accession rows reviewed")
         reset_directory(run_dir)
         shutil.copy2(accessions_dir / "accession_all.csv", run_dir / "accession_all.csv")
@@ -242,7 +248,9 @@ def run_accession_pipeline(
     load_env_file(project_dir / ".env")
     marker_names = list(marker_map(markers))
     if progress:
-        progress.start("accessions", "Querying NCBI GenBank")
+        progress.feed_for("accessions", genus, *outgroups, *marker_names)
+        progress.start("accessions")
+        progress.set_progress("accessions", 5, "NCBI Entrez query", approximate=True)
     records = query_genbank_seqrecords(
         genus=genus,
         outgroups=outgroups,
@@ -253,7 +261,18 @@ def run_accession_pipeline(
         log_path=output_dir / "genbank_query_log.tsv",
     )
     if progress:
-        progress.update("accessions", "Extracting markers and ranking samples")
+        progress.set_progress(
+            "accessions",
+            45,
+            f"{len(records)} GenBank records",
+            approximate=True,
+        )
+        progress.set_progress(
+            "accessions",
+            55,
+            "marker extraction and ranking",
+            approximate=True,
+        )
     result = build_accession_table_from_genbank_records(
         records=records,
         output_dir=output_dir,
@@ -269,6 +288,14 @@ def run_accession_pipeline(
         },
     )
     if progress:
+        selected_rows, _ = read_table(output_dir / "accession_selected.csv")
+        for row in selected_rows:
+            progress.feed(
+                row.get("taxon", ""),
+                row.get("sample_id", ""),
+                row.get("source_record_ids", ""),
+                *(row.get(marker, "") for marker in marker_names),
+            )
         progress.succeed("accessions", f"{result.records_written} selected samples")
     return result
 

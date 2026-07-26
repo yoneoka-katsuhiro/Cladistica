@@ -8,6 +8,6 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
   PYTHON_BIN="python3"
 fi
 
-cd "${PROJECT_DIR}"
 export PYTHONDONTWRITEBYTECODE=1
+cd "${PROJECT_DIR}"
 exec "${PYTHON_BIN}" -m cladistica.cli "$@"
