@@ -1,7 +1,7 @@
 # Cladistica v0.1.2
 
 Cladistica builds chloroplast DNA datasets and phylogenetic trees for
-systematics, evolutionary biology, and biodiversity research. It can start from
+systematics and biodiversity research. It can start from
 NCBI GenBank searches, curated accession tables, marker-wise FASTA files, or an
 already concatenated alignment.
 
