@@ -1,4 +1,4 @@
-# Cladistica v0.1.2
+# Cladistica v0.1.0
 
 Cladistica builds chloroplast DNA datasets and phylogenetic trees for
 systematics and biodiversity research. It can start from
@@ -207,7 +207,7 @@ bash run_cladistica.sh concat --help
 bash run_cladistica.sh tree --help
 ```
 
-Use `package` to flatten an older v0.1.0, v0.1.1, or v0.1.2 working directory:
+Use `package` to flatten an older working directory:
 
 ```bash
 bash run_cladistica.sh package \
