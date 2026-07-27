@@ -1,9 +1,11 @@
-# Cladistica v0.1.0
+# Cladistica v0.1.1
 
 Cladistica builds chloroplast DNA datasets and phylogenetic trees for
 systematics and biodiversity research. It can start from
 NCBI GenBank searches, curated accession tables, marker-wise FASTA files, or an
 already concatenated alignment.
+
+Repository: <https://github.com/yoneoka-katsuhiro/Cladistica>
 
 ## What It Does
 
@@ -24,6 +26,18 @@ ModelFinder, and MrBayes when those stages are requested.
 - Python 3.10 or newer
 - A contact email for NCBI Entrez
 - MUSCLE, IQ-TREE, and MrBayes for full tree workflows
+
+## Download
+
+For normal use, download the release asset `Cladistica-v0.1.1.zip` from
+GitHub Releases. It expands to a clean `Cladistica/` directory:
+
+```bash
+cd Cladistica
+```
+
+GitHub also provides automatic source-code archives, but those may expand to
+branch- or tag-based folder names.
 
 ## Setup
 
