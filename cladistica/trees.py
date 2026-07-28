@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -21,6 +22,35 @@ def detect_command(candidates: list[str], explicit: str = "") -> str | None:
         if found:
             return found
     return None
+
+
+def iqtree_major_version(command: str) -> int:
+    """Return the IQ-TREE major version, or 0 if it cannot be determined.
+
+    IQ-TREE 2/3 use ``-T`` for threads while IQ-TREE 1 uses ``-nt``. Detecting
+    the version lets the runner pick the correct flag and warn when only the
+    legacy v1 binary is available.
+    """
+    try:
+        result = subprocess.run(
+            [command, "--version"],
+            text=True,
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    match = re.search(r"version\s+(\d+)", f"{result.stdout}\n{result.stderr}", flags=re.I)
+    return int(match.group(1)) if match else 0
+
+
+def iqtree_cli_flags(command: str) -> tuple[str, str, int]:
+    """Return partition flag, thread flag, and detected IQ-TREE major version."""
+    major_version = iqtree_major_version(command)
+    if major_version == 1:
+        return "-spp", "-nt", major_version
+    return "-p", "-T", major_version
 
 
 def alignment_statistics(fasta_path: Path) -> dict[str, object]:
@@ -95,7 +125,7 @@ def write_mrbayes_nexus(
     ]
     for sample, sequence in records.items():
         lines.append(f"  {nexus_taxon_label(sample)} {sequence}")
-    lines.extend(["  ;", "end;", "", "begin mrbayes;"])
+    lines.extend(["  ;", "end;", "", "begin mrbayes;", "  set autoclose=yes nowarn=yes;"])
     for row in partitions:
         lines.append(f"  charset {partition_label(str(row['marker']))} = {row['start']}-{row['end']};")
     if len(partitions) > 1:
@@ -103,6 +133,7 @@ def write_mrbayes_nexus(
         lines.append(f"  partition cpDNA = {len(partitions)}: {names};")
         lines.append("  set partition=cpDNA;")
         lines.append("  unlink statefreq=(all) revmat=(all) shape=(all);")
+        lines.append("  prset applyto=(all) ratepr=variable;")
     lines.extend(
         [
             "  lset nst=6 rates=gamma;",
@@ -443,17 +474,29 @@ def run_tree_analyses(
             progress.start("model")
         ml_dir = output_dir / "02_iqtree_ml"
         ml_dir.mkdir(parents=True, exist_ok=True)
+        partition_flag, threads_flag, major_version = iqtree_cli_flags(
+            iqtree or "iqtree"
+        )
+        if major_version == 1:
+            print(
+                "WARNING: IQ-TREE version 1 was detected. Falling back to '-spp' "
+                "for partitions and '-nt' for threads ('-p' and '-T' are IQ-TREE "
+                "2+ syntax). IQ-TREE 2 or 3 is strongly recommended for "
+                "partitioned '-m MFP+MERGE' ML analyses.",
+                file=sys.stderr,
+                flush=True,
+            )
         command = [
             iqtree or "iqtree",
             "-s",
             str(copied_fasta),
-            "-p",
+            partition_flag,
             str(partition_file),
             "-m",
             "MFP+MERGE",
             "-b",
             str(bootstrap),
-            "-T",
+            threads_flag,
             threads,
             "-pre",
             str(ml_dir / "cladistica_ml"),

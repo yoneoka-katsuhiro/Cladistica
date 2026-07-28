@@ -1,4 +1,4 @@
-# Cladistica v0.1.1
+# Cladistica v0.1.2
 
 Cladistica builds chloroplast DNA datasets and phylogenetic trees for
 systematics and biodiversity research. It can start from
@@ -29,7 +29,7 @@ ModelFinder, and MrBayes when those stages are requested.
 
 ## Download
 
-For normal use, download the release asset `Cladistica-v0.1.1.zip` from
+For normal use, download the release asset `Cladistica-v0.1.2.zip` from
 GitHub Releases. It expands to a clean `Cladistica/` directory:
 
 ```bash

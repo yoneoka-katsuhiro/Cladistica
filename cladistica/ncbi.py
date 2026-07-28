@@ -151,38 +151,6 @@ def query_genbank_seqrecords(
     return records
 
 
-def query_genbank_records(
-    *,
-    genus: str,
-    outgroups: list[str],
-    email: str,
-    api_key: str = "",
-    markers: list[str] | None = None,
-    retmax: int = 500,
-    batch_size: int = 50,
-    delay_seconds: float = 0.34,
-    log_path: Path | None = None,
-):
-    from .accessions import record_to_recordlike
-
-    marker_defs = marker_map(markers)
-    seqrecords = query_genbank_seqrecords(
-        genus=genus,
-        outgroups=outgroups,
-        email=email,
-        api_key=api_key,
-        markers=list(marker_defs),
-        retmax=retmax,
-        batch_size=batch_size,
-        delay_seconds=delay_seconds,
-        log_path=log_path,
-    )
-    return [
-        record_to_recordlike(record, query_name=query_name, markers=marker_defs)
-        for query_name, record in seqrecords
-    ]
-
-
 def fetch_one_genbank(accession: str, email: str, api_key: str = "") -> object:
     configure_entrez(email, api_key)
     Entrez, SeqIO = require_biopython()

@@ -273,6 +273,17 @@ def record_to_extracted_marker_records(
 
 
 def candidates_from_records(records: Iterable[RecordLike], markers: dict[str, Marker]) -> tuple[list[AccessionCandidate], list[dict[str, object]]]:
+    """Build candidates from caller-supplied ``RecordLike`` objects.
+
+    This is the alternate, caller-supplied-sequence entry point (see
+    ``build_accession_table_from_records``). Unlike the GenBank pipeline, it does
+    NOT extract per-feature marker sequences: the whole ``RecordLike.sequence`` is
+    used for every marker detected on the record (``extraction_method=
+    "legacy_record_sequence"``). Only pass single-marker records here; for full
+    GenBank records (including plastomes) use
+    ``build_accession_table_from_genbank_records``, which extracts each marker
+    feature individually.
+    """
     extracted_records: list[ExtractedMarkerRecord] = []
     rejected: list[dict[str, object]] = []
     for record in records:
@@ -613,6 +624,12 @@ def build_accession_table_from_records(
     include_trusted_extra: bool = False,
     parameters: dict[str, object] | None = None,
 ) -> PipelineResult:
+    """Build accession outputs from caller-supplied ``RecordLike`` objects.
+
+    Alternate API for callers that already hold one sequence per marker. It uses
+    the whole supplied sequence per marker (no per-feature extraction). For GenBank
+    records use ``build_accession_table_from_genbank_records`` instead.
+    """
     marker_defs = marker_map(markers)
     marker_names = list(marker_defs)
     candidates, rejected = candidates_from_records(records, marker_defs)

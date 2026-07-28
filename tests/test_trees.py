@@ -6,17 +6,50 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from subprocess import CompletedProcess, TimeoutExpired
+from unittest.mock import patch
 
 from cladistica.progress import PipelineProgress
 from cladistica.trees import (
     IQTreeProgressParser,
     MrBayesProgressParser,
+    iqtree_cli_flags,
+    iqtree_major_version,
     run_checked,
     run_tree_analyses,
+    write_mrbayes_nexus,
 )
 
 
 class TreeRunnerTests(unittest.TestCase):
+    def test_iqtree_version_detection_and_compatibility_flags(self) -> None:
+        version_1 = CompletedProcess(
+            ["iqtree", "--version"],
+            0,
+            stdout="IQ-TREE multicore version 1.6.12",
+            stderr="",
+        )
+        with patch("cladistica.trees.subprocess.run", return_value=version_1):
+            self.assertEqual(iqtree_major_version("iqtree"), 1)
+            self.assertEqual(iqtree_cli_flags("iqtree"), ("-spp", "-nt", 1))
+
+        version_3 = CompletedProcess(
+            ["iqtree3", "--version"],
+            0,
+            stdout="IQ-TREE multicore version 3.0.1",
+            stderr="",
+        )
+        with patch("cladistica.trees.subprocess.run", return_value=version_3):
+            self.assertEqual(iqtree_cli_flags("iqtree3"), ("-p", "-T", 3))
+
+    def test_iqtree_version_detection_failure_uses_current_flags(self) -> None:
+        with patch(
+            "cladistica.trees.subprocess.run",
+            side_effect=TimeoutExpired(["iqtree", "--version"], 20),
+        ):
+            self.assertEqual(iqtree_major_version("iqtree"), 0)
+            self.assertEqual(iqtree_cli_flags("iqtree"), ("-p", "-T", 0))
+
     def test_keyboard_interrupt_terminates_external_child_process(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -103,7 +136,33 @@ class TreeRunnerTests(unittest.TestCase):
             self.assertEqual(result.records_written, 0)
             self.assertIn("charset trnL_F", nexus)
             self.assertIn("charset rps4_trnS", nexus)
+            self.assertIn("set autoclose=yes nowarn=yes;", nexus)
+            self.assertIn("prset applyto=(all) ratepr=variable;", nexus)
             self.assertTrue((output_dir / "05_reports" / "alignment_statistics.tsv").exists())
+
+    def test_single_partition_mrbayes_input_does_not_add_variable_rate_prior(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fasta = root / "single.fasta"
+            fasta.write_text(
+                ">sampleA\nAACCGG\n>sampleB\nAATTGG\n",
+                encoding="utf-8",
+            )
+            output = root / "single.nex"
+            write_mrbayes_nexus(
+                output,
+                fasta,
+                [{"marker": "rbcL", "start": 1, "end": 6, "length": 6}],
+                ngen=10_000,
+                nruns=2,
+                nchains=4,
+                burninfrac=0.25,
+            )
+            nexus = output.read_text(encoding="utf-8")
+            self.assertIn("set autoclose=yes nowarn=yes;", nexus)
+            self.assertNotIn("ratepr=variable", nexus)
 
 
 if __name__ == "__main__":
