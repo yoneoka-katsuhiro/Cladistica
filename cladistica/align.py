@@ -5,7 +5,7 @@ import subprocess
 from collections import OrderedDict
 from pathlib import Path
 
-from .config import marker_map
+from .config import marker_map, safe_token
 from .io import read_fasta, sample_id_from_header, write_fasta, write_tsv
 from .models import PipelineResult
 from .progress import PipelineProgress
@@ -22,11 +22,16 @@ def detect_muscle(command: str = "") -> str | None:
 
 
 def marker_fasta_path(base_dir: Path, marker: str) -> Path:
-    for suffix in (".fasta", ".fa", ".fas", ".fna"):
-        path = base_dir / f"{marker}{suffix}"
-        if path.exists():
-            return path
-    return base_dir / f"{marker}.fasta"
+    stems = [marker]
+    sanitized = safe_token(marker)
+    if sanitized != marker:
+        stems.append(sanitized)
+    for stem in stems:
+        for suffix in (".fasta", ".fa", ".fas", ".fna"):
+            path = base_dir / f"{stem}{suffix}"
+            if path.exists():
+                return path
+    return base_dir / f"{sanitized}.fasta"
 
 
 def collect_marker_records(marker: str, genbank_dir: Path, user_dir: Path) -> tuple[OrderedDict[str, str], list[dict[str, object]]]:
@@ -122,9 +127,10 @@ def align_by_marker(
         if progress and records:
             progress.update("align", f"{marker}: {len(records)} sequences")
         duplicate_rows.extend(duplicates)
-        combined_path = output_dir / "intermediate" / "combined_by_marker" / f"{marker}.fasta"
-        raw_path = output_dir / "intermediate" / "raw_muscle_alignment_by_marker" / f"{marker}.fasta"
-        aligned_path = output_dir / "aligned_by_marker" / f"{marker}.fasta"
+        marker_stem = safe_token(marker)
+        combined_path = output_dir / "intermediate" / "combined_by_marker" / f"{marker_stem}.fasta"
+        raw_path = output_dir / "intermediate" / "raw_muscle_alignment_by_marker" / f"{marker_stem}.fasta"
+        aligned_path = output_dir / "aligned_by_marker" / f"{marker_stem}.fasta"
         if not records:
             rejected_rows.append({"marker": marker, "sample_id": "", "reason": "no_input_sequences"})
             qc_rows.append({"marker": marker, "records": 0, "alignment_length": "", "status": "skipped_no_input"})

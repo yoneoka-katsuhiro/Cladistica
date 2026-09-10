@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Iterator
 
-from .config import Marker, marker_map
+from .config import Marker, marker_map, marker_query_terms, normalize_marker_text
 
 
 def require_biopython():
@@ -32,7 +32,7 @@ def marker_query(markers: dict[str, Marker]) -> str:
     # expressions with multiple quoted aliases, especially for broad genera.
     tokens: list[str] = ["chloroplast", "plastid", "plastome"]
     for marker in markers.values():
-        tokens.append(marker.name)
+        tokens.extend(marker_query_terms(marker))
     unique = []
     seen = set()
     for token in tokens:
@@ -54,7 +54,22 @@ def marker_search_terms(query_name: str, markers: dict[str, Marker]) -> list[tup
         )
     ]
     for marker in markers.values():
-        terms.append((marker.name, f'{base} AND "{marker.name}"[All Fields] {excluded}'))
+        query_terms = marker_query_terms(marker)
+        if marker.flanks:
+            left, right = marker.flanks
+            flank_keys = {normalize_marker_text(left), normalize_marker_text(right)}
+            interval_terms = [
+                term for term in query_terms
+                if normalize_marker_text(term) not in flank_keys
+            ]
+            alternatives = [f'"{term}"[All Fields]' for term in interval_terms]
+            alternatives.append(
+                f'("{left}"[All Fields] AND "{right}"[All Fields])'
+            )
+        else:
+            alternatives = [f'"{term}"[All Fields]' for term in query_terms]
+        marker_clause = " OR ".join(alternatives)
+        terms.append((marker.name, f"{base} AND ({marker_clause}) {excluded}"))
     return terms
 
 

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cladistica"
-version = "0.1.2"
-description = "Cladistica: modular cpDNA accession-to-tree phylogenetic workflows."
+version = "0.1.3"
+description = "Cladistica: modular plant marker accession-to-tree phylogenetic workflows."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

@@ -3,19 +3,21 @@ from __future__ import annotations
 from collections import OrderedDict
 from pathlib import Path
 
-from .config import marker_map
+from .config import marker_map, safe_token
 from .io import read_fasta, sample_id_from_header, write_fasta, write_tsv
 from .models import PipelineResult
 from .progress import PipelineProgress
 
 
 def marker_input_path(input_dir: Path, marker: str) -> Path | None:
+    stems = [marker]
+    sanitized = safe_token(marker)
+    if sanitized != marker:
+        stems.append(sanitized)
     candidates = [
-        input_dir / f"{marker}.fasta",
-        input_dir / f"{marker}.aligned.fasta",
-        input_dir / f"{marker}.masked.fasta",
-        input_dir / f"{marker}.fa",
-        input_dir / f"{marker}.fas",
+        input_dir / f"{stem}{suffix}"
+        for stem in stems
+        for suffix in (".fasta", ".aligned.fasta", ".masked.fasta", ".fa", ".fas")
     ]
     return next((path for path in candidates if path.exists()), None)
 

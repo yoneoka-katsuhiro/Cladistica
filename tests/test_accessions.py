@@ -10,6 +10,7 @@ from cladistica.accessions import (
     build_accession_table_from_records,
     candidates_from_extracted_records,
     candidates_from_records,
+    marker_names_from_record,
     select_representatives,
 )
 from cladistica.config import marker_map
@@ -129,6 +130,21 @@ class AccessionSelectionTests(unittest.TestCase):
             self.assertEqual(next(row for row in all_rows if row["selection_status"] == "rejected")["source_record_ids"], "B1")
             self.assertTrue((out / "fasta_by_marker" / "rbcL.fasta").exists())
             self.assertTrue((out / "summly.txt").exists())
+
+    def test_marker_detection_uses_exact_feature_identifiers(self) -> None:
+        class Feature:
+            type = "CDS"
+            qualifiers = {"gene": ["rps14"]}
+
+        class Record:
+            name = "record"
+            id = "A1"
+            description = "chloroplast sequence"
+            features = [Feature()]
+
+        found = marker_names_from_record(Record(), marker_map(["rps4", "rps14"]))
+
+        self.assertEqual(found, {"rps14"})
 
 
 if __name__ == "__main__":

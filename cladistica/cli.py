@@ -29,8 +29,8 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 
 PIPELINE_DESCRIPTIONS = {
     "accessions": (
-        "GenBank からターゲット Genus と outgroup の cpDNA 候補レコードを取得し、marker 領域を抽出します。"
-        "CDS marker と noncoding marker を分け、CDS は partial Sanger fragment を許容しつつ internal stop/pseudo/codon frame の QC を記録します。"
+        "GenBank からターゲット Genus と outgroup の候補レコードを取得し、marker 領域を抽出します。"
+        "GenBank feature から CDS、rRNA、tRNA、noncoding marker を判定し、CDS は partial Sanger fragment を許容しつつ internal stop/pseudo/codon frame の QC を記録します。"
         "デフォルトでは不確実な同定名を除外し、抽出済み marker coverage、QC、出版済み/受理済みらしさ、抽出配列長の順で 1 taxon = 1 sample を選びます。"
     ),
     "download": (
@@ -62,24 +62,23 @@ PIPELINE_DESCRIPTIONS = {
 
 USAGE_CAPTIONS = [
     (
-        "Example 1: NCBI登録データを確認する",
-        "`survey --genus GENUS --outgroup ... --markers rbcL trnL-F` で accession_all.csv を作成します。"
-        "まずは2領域で軽く試すのがおすすめです。",
-    ),
-    (
-        "Example 2: 手選別したaccession_selected.csvから再開する",
-        "`resume --accession-selected accession_selected.csv --accession-all accession_all.csv` で、"
-        "配列取得からML・BIまで進めます。",
-    ),
-    (
-        "Example 3: 自作FASTAからML・BIを実行する",
-        "マーカー別FASTAなら `resume --fasta-dir DIR`、連結済みalignmentなら "
+        "Caption 1: 自作FASTAからML・BIを一括解析",
+        "マーカー別FASTAなら `resume --fasta-dir DIR`、すでにalignment・concatenate済みなら "
         "`resume --concatenated-fasta FILE` を使います。",
     ),
     (
-        "Example 4: Cladistica配列と自作配列を統合する",
+        "Caption 2: NCBI登録データの全容だけを確認",
+        "`survey --genus GENUS --outgroup ...` を実行すると accession_all.csv、summly.txt、run.logだけを返します。",
+    ),
+    (
+        "Caption 3: 手選別したaccession_selected.csvから再開",
+        "`resume --accession-selected accession_selected.csv --accession-all accession_all.csv` で、"
+        "配列取得からML・BIまでを一括実行します。",
+    ),
+    (
+        "Caption 4: Cladistica配列と自作配列を統合",
         "`resume --fasta-dir CLADISTICA_OUTPUT --add-fasta-dir MY_FASTA` でsample IDを照合して統合し、"
-        "alignment、concatenation、ML、BIまで進めます。",
+        "alignment、concatenation、ML、BIまで進めます。同一sample IDは追加側を優先します。",
     ),
 ]
 
@@ -116,7 +115,11 @@ def add_marker_argument(parser: argparse.ArgumentParser) -> None:
         "--markers",
         nargs="+",
         default=None,
-        help="Marker names. Default: " + ", ".join(marker.name for marker in DEFAULT_MARKERS),
+        help=(
+            "Marker names or geneA-geneB intervals. Curated aliases and GenBank annotations "
+            "are resolved automatically. Default: "
+            + ", ".join(marker.name for marker in DEFAULT_MARKERS)
+        ),
     )
 
 
@@ -161,7 +164,7 @@ def cmd_describe(args: argparse.Namespace) -> int:
 
 
 def cmd_examples(args: argparse.Namespace) -> int:
-    print(f"Cladistica v{__version__} recommended examples")
+    print(f"Cladistica v{__version__} usage captions")
     print()
     for title, text in USAGE_CAPTIONS:
         print(title)
@@ -424,7 +427,7 @@ def build_parser() -> argparse.ArgumentParser:
     describe = subparsers.add_parser("describe", help="Explain the default behavior of each pipeline.")
     describe.set_defaults(func=cmd_describe)
 
-    examples = subparsers.add_parser("examples", help="Show four recommended usage examples.")
+    examples = subparsers.add_parser("examples", help="Show four supported partial-workflow captions.")
     examples.set_defaults(func=cmd_examples)
 
     survey = subparsers.add_parser("survey", help="Stop after writing accession_all.csv.")

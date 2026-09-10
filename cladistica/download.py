@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .config import marker_map, safe_token
+from .config import marker_map, resolve_marker, safe_token
 from .extraction import extract_marker_sequence, sequence_has_ambiguous_bases, split_accessions
 from .io import read_table, write_fasta
 from .models import PipelineResult
@@ -64,7 +64,18 @@ def download_fasta_from_accession_table(
     output_dir.mkdir(parents=True, exist_ok=True)
     marker_defs = marker_map(markers)
     rows, fieldnames = read_table(accession_table)
-    marker_names = [name for name in marker_defs if name in fieldnames]
+    columns: dict[str, str] = {}
+    for field in fieldnames:
+        try:
+            canonical = resolve_marker(field).name
+        except ValueError:
+            continue
+        if canonical in marker_defs:
+            if canonical in columns:
+                raise ValueError(f"Multiple columns refer to marker {canonical}")
+            columns[canonical] = field
+    marker_names = [name for name in marker_defs if name in columns]
+    rows = [dict(row, **{name: row.get(column, "") for name, column in columns.items()}) for row in rows]
     if not marker_names:
         raise ValueError("No requested marker columns were found in the accession table.")
     validate_selected_accessions(rows, marker_names)
@@ -143,7 +154,7 @@ def download_fasta_from_accession_table(
                         )
     for marker_name, records in fasta_by_marker.items():
         if records:
-            write_fasta(output_dir / f"{marker_name}.fasta", records)
+            write_fasta(output_dir / f"{safe_token(marker_name)}.fasta", records)
 
     log_fields = [
         "taxon",

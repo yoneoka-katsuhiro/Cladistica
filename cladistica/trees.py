@@ -25,12 +25,7 @@ def detect_command(candidates: list[str], explicit: str = "") -> str | None:
 
 
 def iqtree_major_version(command: str) -> int:
-    """Return the IQ-TREE major version, or 0 if it cannot be determined.
-
-    IQ-TREE 2/3 use ``-T`` for threads while IQ-TREE 1 uses ``-nt``. Detecting
-    the version lets the runner pick the correct flag and warn when only the
-    legacy v1 binary is available.
-    """
+    """Return the detected IQ-TREE major version, or 0 when unknown."""
     try:
         result = subprocess.run(
             [command, "--version"],
@@ -39,18 +34,10 @@ def iqtree_major_version(command: str) -> int:
             timeout=20,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
+    except Exception:
         return 0
     match = re.search(r"version\s+(\d+)", f"{result.stdout}\n{result.stderr}", flags=re.I)
     return int(match.group(1)) if match else 0
-
-
-def iqtree_cli_flags(command: str) -> tuple[str, str, int]:
-    """Return partition flag, thread flag, and detected IQ-TREE major version."""
-    major_version = iqtree_major_version(command)
-    if major_version == 1:
-        return "-spp", "-nt", major_version
-    return "-p", "-T", major_version
 
 
 def alignment_statistics(fasta_path: Path) -> dict[str, object]:
@@ -474,15 +461,14 @@ def run_tree_analyses(
             progress.start("model")
         ml_dir = output_dir / "02_iqtree_ml"
         ml_dir.mkdir(parents=True, exist_ok=True)
-        partition_flag, threads_flag, major_version = iqtree_cli_flags(
-            iqtree or "iqtree"
-        )
+        threads_flag = "-T"
+        major_version = iqtree_major_version(iqtree or "iqtree")
         if major_version == 1:
+            threads_flag = "-nt"
             print(
-                "WARNING: IQ-TREE version 1 was detected. Falling back to '-spp' "
-                "for partitions and '-nt' for threads ('-p' and '-T' are IQ-TREE "
-                "2+ syntax). IQ-TREE 2 or 3 is strongly recommended for "
-                "partitioned '-m MFP+MERGE' ML analyses.",
+                "WARNING: IQ-TREE version 1 was detected. Falling back to the '-nt' "
+                "thread flag ('-T' is IQ-TREE 2+ only). IQ-TREE 2 or 3 is strongly "
+                "recommended for partitioned '-m MFP+MERGE' ML analyses.",
                 file=sys.stderr,
                 flush=True,
             )
@@ -490,7 +476,7 @@ def run_tree_analyses(
             iqtree or "iqtree",
             "-s",
             str(copied_fasta),
-            partition_flag,
+            "-p",
             str(partition_file),
             "-m",
             "MFP+MERGE",

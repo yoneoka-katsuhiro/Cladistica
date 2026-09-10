@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
-from .config import UNCERTAIN_NAME_PATTERNS, Marker, marker_map, normalize_marker_text, safe_token
-from .extraction import extract_marker_sequence
+from .config import UNCERTAIN_NAME_PATTERNS, Marker, marker_map, safe_token
+from .extraction import extract_marker_sequence, record_matches_marker
 from .io import write_csv, write_fasta
 from .models import AccessionCandidate, MarkerHit, PipelineResult
 
@@ -145,22 +145,11 @@ def accession_from_record(record: object) -> str:
 
 
 def marker_names_from_record(record: object, markers: dict[str, Marker]) -> set[str]:
-    text_parts = [
-        str(getattr(record, "name", "") or ""),
-        str(getattr(record, "id", "") or ""),
-        str(getattr(record, "description", "") or ""),
-    ]
-    for feature in getattr(record, "features", []) or []:
-        qualifiers = getattr(feature, "qualifiers", {}) or {}
-        for values in qualifiers.values():
-            text_parts.extend(str(value) for value in values)
-    text = normalize_marker_text(" ".join(text_parts))
-    found: set[str] = set()
-    for marker in markers.values():
-        aliases = (marker.name, *marker.aliases)
-        if any(normalize_marker_text(alias) in text for alias in aliases):
-            found.add(marker.name)
-    return found
+    return {
+        marker.name
+        for marker in markers.values()
+        if record_matches_marker(record, marker)
+    }
 
 
 def record_to_recordlike(record: object, query_name: str, markers: dict[str, Marker]) -> RecordLike:
@@ -273,16 +262,11 @@ def record_to_extracted_marker_records(
 
 
 def candidates_from_records(records: Iterable[RecordLike], markers: dict[str, Marker]) -> tuple[list[AccessionCandidate], list[dict[str, object]]]:
-    """Build candidates from caller-supplied ``RecordLike`` objects.
+    """Build candidates from caller-supplied, already isolated marker sequences.
 
-    This is the alternate, caller-supplied-sequence entry point (see
-    ``build_accession_table_from_records``). Unlike the GenBank pipeline, it does
-    NOT extract per-feature marker sequences: the whole ``RecordLike.sequence`` is
-    used for every marker detected on the record (``extraction_method=
-    "legacy_record_sequence"``). Only pass single-marker records here; for full
-    GenBank records (including plastomes) use
-    ``build_accession_table_from_genbank_records``, which extracts each marker
-    feature individually.
+    This compatibility API treats each supplied sequence as a complete marker.
+    Use ``candidates_from_extracted_records`` for annotated GenBank records and
+    complete organellar genomes that require per-feature extraction.
     """
     extracted_records: list[ExtractedMarkerRecord] = []
     rejected: list[dict[str, object]] = []
@@ -516,7 +500,7 @@ def write_marker_fastas(output_dir: Path, candidates: list[AccessionCandidate], 
             if hit and hit.sequence:
                 records[fasta_header(candidate, marker, hit)] = hit.sequence
         if records:
-            write_fasta(output_dir / directory_name / f"{marker}.fasta", records)
+            write_fasta(output_dir / directory_name / f"{safe_token(marker)}.fasta", records)
 
 
 def write_accession_outputs(
@@ -624,11 +608,10 @@ def build_accession_table_from_records(
     include_trusted_extra: bool = False,
     parameters: dict[str, object] | None = None,
 ) -> PipelineResult:
-    """Build accession outputs from caller-supplied ``RecordLike`` objects.
+    """Write accession outputs for caller-supplied, already isolated markers.
 
-    Alternate API for callers that already hold one sequence per marker. It uses
-    the whole supplied sequence per marker (no per-feature extraction). For GenBank
-    records use ``build_accession_table_from_genbank_records`` instead.
+    This compatibility entry point does not extract features from full GenBank
+    records. Use ``build_accession_table_from_genbank_records`` for that task.
     """
     marker_defs = marker_map(markers)
     marker_names = list(marker_defs)

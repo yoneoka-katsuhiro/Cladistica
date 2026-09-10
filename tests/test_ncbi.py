@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from cladistica.config import marker_map
-from cladistica.ncbi import search_ids, search_term_ids
+from cladistica.ncbi import marker_search_terms, search_ids, search_term_ids
 
 
 class FakeHandle:
@@ -55,6 +55,21 @@ class NcbiSearchTests(unittest.TestCase):
         with patch("cladistica.ncbi.require_biopython", return_value=(FakeEntrez, object())):
             ids = search_ids("Testgenus", marker_map(["rbcL"]), retmax=10, delay_seconds=0)
         self.assertEqual(len(ids), 10)
+
+    def test_intergenic_search_requires_both_flanking_genes(self) -> None:
+        terms = dict(marker_search_terms("Testgenus", marker_map(["rbcL-accD"])))
+
+        self.assertIn('"rbcL"[All Fields] AND "accD"[All Fields]', terms["rbcL-accD"])
+
+    def test_rrna_search_includes_product_alias(self) -> None:
+        terms = dict(marker_search_terms("Testgenus", marker_map(["5.8S ribosomal RNA"])))
+
+        self.assertIn('"5.8S ribosomal RNA"[All Fields]', terms["5.8S"])
+
+    def test_intron_search_includes_its_source_gene(self) -> None:
+        terms = dict(marker_search_terms("Testgenus", marker_map(["rps16 intron"])))
+
+        self.assertIn('"rps16"[All Fields]', terms["rps16 intron"])
 
 
 if __name__ == "__main__":
