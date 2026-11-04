@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import shutil
+import os
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -39,12 +41,37 @@ def copy_glob_flat(source_dir: Path, pattern: str, output_dir: Path) -> int:
     return copied
 
 
+def validate_archive_path(archive_path: Path, *source_dirs: Path) -> None:
+    """Reject destructive or recursively self-including archive destinations."""
+    if archive_path.exists() or archive_path.is_symlink():
+        raise FileExistsError(f"Archive destination already exists: {archive_path}")
+    destination = archive_path.resolve()
+    for source_dir in source_dirs:
+        source = source_dir.resolve()
+        if destination == source or source in destination.parents:
+            raise ValueError("Archive destination must be outside the source run and packaged output directories.")
+
+
 def write_zip(source_dir: Path, archive_path: Path) -> None:
+    validate_archive_path(archive_path, source_dir)
     archive_path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(source_dir.rglob("*")):
-            if path.is_file():
-                archive.write(path, path.relative_to(source_dir))
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=archive_path.parent, prefix=".cladistica-archive-", suffix=".tmp", delete=False) as handle:
+            temporary = Path(handle.name)
+            with zipfile.ZipFile(handle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for path in sorted(source_dir.rglob("*")):
+                    if path.is_file():
+                        archive.write(path, path.relative_to(source_dir))
+            handle.flush()
+            os.fsync(handle.fileno())
+        # A hard link publishes the complete file atomically and refuses an
+        # existing destination, including one created since validation. The
+        # temporary file is on the same filesystem as its final destination.
+        os.link(temporary, archive_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def append_file_section(lines: list[str], title: str, path: Path) -> bool:
@@ -120,6 +147,7 @@ def write_flat_summary(work_dir: Path, output_dir: Path) -> None:
         "BI.nex": "executable MrBayes analysis file, including charset definitions.",
         "ML.tre": "IQ-TREE maximum-likelihood tree.",
         "BI.tre": "MrBayes consensus tree.",
+        "BI_resume": "Complete BI continuation bundle: checkpoint, tree/parameter samples, diagnostics, manifest and logs. Keep the entire directory.",
         "run1.p": "MrBayes run 1 parameter trace for Tracer.",
         "run2.p": "MrBayes run 2 parameter trace for Tracer.",
         "run.log": "combined query, QC, IQ-TREE, and MrBayes log.",
@@ -152,6 +180,14 @@ def package_run_outputs(
 ) -> PipelineResult:
     """Create one flat, reader-facing result directory from temporary stage outputs."""
     warnings: list[str] = []
+    if archive_path is not None:
+        validate_archive_path(archive_path, run_dir, output_dir)
+    source = run_dir.resolve()
+    destination = output_dir.resolve()
+    if source == destination or (reset_output and destination in source.parents):
+        raise ValueError("Packaging output must not replace the source run or its parent.")
+    if reset_output and output_dir.exists() and any(output_dir.iterdir()):
+        raise ValueError("Packaging output is not empty; choose a new directory to protect existing results.")
     if reset_output:
         reset_directory(output_dir)
     else:
@@ -198,6 +234,9 @@ def package_run_outputs(
         warnings.append("missing: concatenated stage output")
 
     if tree_dir:
+        bi_source = tree_dir / "03_mrbayes"
+        if bi_source.is_dir():
+            shutil.copytree(bi_source, output_dir / "BI_resume", dirs_exist_ok=True)
         required_tree_files = {"partitions.txt"}
         if expect_ml:
             required_tree_files.add("ML.tre")

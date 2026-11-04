@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import tempfile
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
@@ -35,6 +36,16 @@ def load_env_file(path: Path) -> None:
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1]
         os.environ.setdefault(key, value)
+
+
+@contextmanager
+def durable_analysis_workspace(output_dir: Path):
+    """Keep raw analysis files even after interruption or a hard process kill."""
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise ValueError("Output directory is not empty. Choose a new directory; use resume-bi to extend BI.")
+    work_dir = output_dir / "_work"
+    work_dir.mkdir(parents=True)
+    yield work_dir
 
 
 def default_run_dir(root: Path, genus: str = "") -> Path:
@@ -311,8 +322,7 @@ def run_full_workflow(
 ) -> PipelineResult:
     run_dir = output_dir or default_run_dir(project_dir, genus)
     marker_names = list(marker_map(markers))
-    with tempfile.TemporaryDirectory(prefix="cladistica_") as temporary:
-        work_dir = Path(temporary)
+    with durable_analysis_workspace(run_dir) as work_dir:
         accessions_dir = work_dir / "accessions"
 
         accession_result = run_accession_pipeline(
@@ -365,6 +375,7 @@ def run_full_workflow(
         packaged = package_run_outputs(
             run_dir=work_dir,
             output_dir=run_dir,
+            reset_output=False,
             expect_ml=not skip_ml,
             expect_bi=not skip_bi,
         )
@@ -400,8 +411,7 @@ def run_from_selected_accessions(
 ) -> PipelineResult:
     run_dir = output_dir or default_run_dir(project_dir)
     marker_names = list(marker_map(markers))
-    with tempfile.TemporaryDirectory(prefix="cladistica_") as temporary:
-        work_dir = Path(temporary)
+    with durable_analysis_workspace(run_dir) as work_dir:
         accessions_dir = work_dir / "accessions"
         fasta_dir = accessions_dir / "fasta_by_marker"
         accessions_dir.mkdir(parents=True)
@@ -452,6 +462,7 @@ def run_from_selected_accessions(
         packaged = package_run_outputs(
             run_dir=work_dir,
             output_dir=run_dir,
+            reset_output=False,
             expect_accessions=accession_all is not None,
             expect_ml=not skip_ml,
             expect_bi=not skip_bi,
@@ -493,8 +504,7 @@ def run_from_fasta(
     if additional_fasta_dir and not fasta_dir:
         raise ValueError("additional_fasta_dir can only be used with marker FASTA input.")
 
-    with tempfile.TemporaryDirectory(prefix="cladistica_") as temporary:
-        work_dir = Path(temporary)
+    with durable_analysis_workspace(run_dir) as work_dir:
         concat_dir = work_dir / "concatenated"
         tree_dir = work_dir / "trees"
         expect_marker_fasta = bool(fasta_dir)
@@ -568,6 +578,7 @@ def run_from_fasta(
         packaged = package_run_outputs(
             run_dir=work_dir,
             output_dir=run_dir,
+            reset_output=False,
             expect_accessions=False,
             expect_marker_fasta=expect_marker_fasta,
             expect_ml=not skip_ml,

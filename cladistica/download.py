@@ -10,8 +10,20 @@ from .ncbi import fetch_one_genbank
 from .progress import PipelineProgress
 
 
+def selected_sample_id(row: dict[str, str]) -> str:
+    """Keep a selected row's identity stable across its marker accessions."""
+    explicit = row.get("sample_id", "").strip()
+    if explicit:
+        if any(character in "|>" or ord(character) < 32 for character in explicit):
+            raise ValueError(f"Invalid sample_id: {explicit!r}; avoid pipes and control characters.")
+        return explicit
+    taxon = safe_token(row.get("taxon", "taxon"))
+    voucher = row.get("voucher_or_isolate", "").strip()
+    return f"{taxon}_{safe_token(voucher)}" if voucher else taxon
+
+
 def sample_header(row: dict[str, str], marker: str, accession: str) -> str:
-    sample = row.get("sample_id") or f"{safe_token(row.get('taxon', 'taxon'))}_{safe_token(row.get('voucher_or_isolate', accession))}"
+    sample = selected_sample_id(row)
     metadata = [
         f"taxon={row.get('taxon', '')}",
         f"marker={marker}",
@@ -20,13 +32,14 @@ def sample_header(row: dict[str, str], marker: str, accession: str) -> str:
     voucher = row.get("voucher_or_isolate", "")
     if voucher:
         metadata.append(f"voucher={voucher}")
-    return f"{sample}|" + "|".join(item.replace("\t", " ") for item in metadata)
+    return f"{sample}|" + "|".join(" ".join(item.replace("|", " ").split()) for item in metadata)
 
 
 def validate_selected_accessions(rows: list[dict[str, str]], marker_names: list[str]) -> None:
     if not rows:
         raise ValueError("The selected accession table has no data rows.")
     seen_samples: set[str] = set()
+    seen_fasta_ids: set[str] = set()
     for row_number, row in enumerate(rows, start=2):
         taxon = row.get("taxon", "").strip()
         sample_id = row.get("sample_id", "").strip()
@@ -36,6 +49,10 @@ def validate_selected_accessions(rows: list[dict[str, str]], marker_names: list[
         if identity in seen_samples:
             raise ValueError(f"Duplicate sample_id/taxon in accession_selected.csv: {identity}")
         seen_samples.add(identity)
+        fasta_id = selected_sample_id(row)
+        if fasta_id in seen_fasta_ids:
+            raise ValueError(f"Duplicate FASTA sample ID after normalization: {fasta_id!r}; provide unique sample_id values.")
+        seen_fasta_ids.add(fasta_id)
         accession_count = 0
         for marker in marker_names:
             accessions = split_accessions(row.get(marker, ""))

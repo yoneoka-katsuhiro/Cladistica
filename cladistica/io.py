@@ -24,23 +24,33 @@ def read_xlsx(path: Path) -> tuple[list[dict[str, str]], list[str]]:
         from openpyxl import load_workbook  # type: ignore
     except ImportError as exc:
         raise RuntimeError("openpyxl is required to read .xlsx files. Install dependencies from requirements.txt.") from exc
-    workbook = load_workbook(path, read_only=True, data_only=True)
-    sheet = workbook.active
-    rows_iter = sheet.iter_rows(values_only=True)
-    header_values = next(rows_iter, None)
-    if not header_values:
-        return [], []
-    fieldnames = [str(value).strip() if value is not None else "" for value in header_values]
-    rows: list[dict[str, str]] = []
-    for values in rows_iter:
-        row = {
-            fieldnames[index]: "" if value is None else str(value)
-            for index, value in enumerate(values)
-            if index < len(fieldnames) and fieldnames[index]
-        }
-        if any(value for value in row.values()):
-            rows.append(row)
-    return rows, [field for field in fieldnames if field]
+    # Own the file descriptor so constructor/iteration failures also release it.
+    # Windows cannot rename/delete an XLSX while its ZIP archive remains open.
+    with path.open("rb") as source:
+        workbook = load_workbook(source, read_only=True, data_only=True)
+        rows_iter = None
+        try:
+            rows_iter = workbook.active.iter_rows(values_only=True)
+            header_values = next(rows_iter, None)
+            if not header_values:
+                return [], []
+            fieldnames = [str(value).strip() if value is not None else "" for value in header_values]
+            rows: list[dict[str, str]] = []
+            for values in rows_iter:
+                row = {
+                    fieldnames[index]: "" if value is None else str(value)
+                    for index, value in enumerate(values)
+                    if index < len(fieldnames) and fieldnames[index]
+                }
+                if any(value for value in row.values()):
+                    rows.append(row)
+            return rows, [field for field in fieldnames if field]
+        finally:
+            try:
+                if rows_iter is not None:
+                    rows_iter.close()
+            finally:
+                workbook.close()
 
 
 def read_table(path: Path) -> tuple[list[dict[str, str]], list[str]]:
@@ -90,23 +100,34 @@ def write_xlsx(path: Path, rows: list[dict[str, object]], fieldnames: list[str])
 
 
 def read_fasta(path: Path) -> OrderedDict[str, str]:
+    """Read FASTA without silently discarding malformed or duplicate records."""
     records: OrderedDict[str, str] = OrderedDict()
     header = ""
     chunks: list[str] = []
     if not path.exists():
         return records
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw.strip()
         if not line:
             continue
         if line.startswith(">"):
             if header:
+                if not chunks:
+                    raise ValueError(f"Empty FASTA sequence for {header!r}: {path}")
                 records[header] = "".join(chunks)
             header = line[1:].strip()
+            if not header:
+                raise ValueError(f"Empty FASTA header at line {line_number}: {path}")
+            if header in records:
+                raise ValueError(f"Duplicate FASTA header {header!r} at line {line_number}: {path}")
             chunks = []
         else:
+            if not header:
+                raise ValueError(f"Sequence before FASTA header at line {line_number}: {path}")
             chunks.append(line)
     if header:
+        if not chunks:
+            raise ValueError(f"Empty FASTA sequence for {header!r}: {path}")
         records[header] = "".join(chunks)
     return records
 

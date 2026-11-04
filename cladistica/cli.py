@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .bayes import resume_bayes
 from .align import align_by_marker
 from .concat import concatenate_alignments
 from .config import DEFAULT_MARKERS
@@ -24,7 +25,7 @@ from .workflow import (
 )
 
 
-PROJECT_DIR = Path(__file__).resolve().parents[1]
+PROJECT_DIR = Path.cwd()
 
 
 PIPELINE_DESCRIPTIONS = {
@@ -170,6 +171,12 @@ def cmd_examples(args: argparse.Namespace) -> int:
         print(title)
         print(text)
         print()
+    return 0
+
+
+def cmd_self_check(args: argparse.Namespace) -> int:
+    from .self_check import self_check
+    self_check()
     return 0
 
 
@@ -400,6 +407,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resume_bi(args: argparse.Namespace) -> int:
+    result = resume_bayes(
+        bundle=args.bundle.expanduser().resolve(),
+        output_dir=args.output.expanduser().resolve(), ngen=args.ngen,
+        command=args.mrbayes or "mb",
+    )
+    print(f"Output: {result.output_dir}")
+    print("BI continuation completed. Review convergence before interpreting the tree.")
+    return 0
+
+
 def cmd_package(args: argparse.Namespace) -> int:
     archive_path = args.archive.expanduser().resolve() if args.archive else None
     output_dir = args.output.expanduser().resolve() if args.output else default_run_dir(PROJECT_DIR)
@@ -429,6 +447,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     examples = subparsers.add_parser("examples", help="Show four supported partial-workflow captions.")
     examples.set_defaults(func=cmd_examples)
+
+    check = subparsers.add_parser("self-check", help="Check GenBank and Excel parsers offline without external tools.")
+    check.set_defaults(func=cmd_self_check)
 
     survey = subparsers.add_parser("survey", help="Stop after writing accession_all.csv.")
     survey.add_argument("--genus", required=True, help="Target genus, e.g. Hymenasplenium.")
@@ -461,6 +482,13 @@ def build_parser() -> argparse.ArgumentParser:
     add_inference_arguments(resume)
     add_progress_argument(resume)
     resume.set_defaults(func=cmd_resume)
+
+    resume_bi = subparsers.add_parser("resume-bi", help="Extend a preserved MrBayes checkpoint in a new output directory.")
+    resume_bi.add_argument("--bundle", type=Path, required=True, help="BI_resume directory, completed result directory, or interrupted _work/trees/03_mrbayes.")
+    resume_bi.add_argument("--output", type=Path, required=True, help="New output directory; the source bundle stays unchanged.")
+    resume_bi.add_argument("--ngen", type=int, required=True, help="Total target generation (not an additional count), multiple of 1000.")
+    resume_bi.add_argument("--mrbayes", default="", help="MrBayes executable; use the same version as the original run.")
+    resume_bi.set_defaults(func=cmd_resume_bi)
 
     accessions = subparsers.add_parser("accessions", help="Build a selected cpDNA accession table from GenBank.")
     add_accession_arguments(accessions)

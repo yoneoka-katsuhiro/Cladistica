@@ -1,235 +1,75 @@
-# Cladistica v0.1.3
+# Cladistica 0.2.0
 
-Cladistica is a plant molecular phylogenetic pipeline for surveying sequences
-in NCBI GenBank, selecting accessions, combining them with your own sequences,
-and performing maximum-likelihood (ML) and Bayesian-inference (BI) analyses.
+Cladistica takes plant DNA markers from reviewed GenBank accessions or your own FASTA files to an aligned matrix and phylogenetic trees. It runs MUSCLE for alignment, IQ-TREE for maximum likelihood, and MrBayes for Bayesian inference. Every stage can also run separately.
 
-## Main workflow
+[Download](https://github.com/yoneoka-katsuhiro/Cladistica/releases) · [日本語](README-ja.md) · [English manual](docs/MANUAL.en.md) · [日本語マニュアル](docs/MANUAL.ja.md) · [Changes](CHANGELOG.md)
 
-Cladistica is designed around two common use cases:
+![Actual MrBayes consensus and parameter traces from the four-taxon synthetic demonstration.](docs/images/demo-output.png)
 
-1. Search NCBI GenBank and create `accession_all.csv` for manual review.
-2. Read a curated `accession_selected.csv`, combine the selected GenBank
-   sequences with your own sequences, and continue through alignment,
-   concatenation, ML, and BI analyses.
+*The supplied 32-base synthetic matrix was run for 2,000 generations, then extended to 4,000 using its checkpoint. The image shows actual program output. This short demonstration tests file continuity; it is not a biological result or evidence of MCMC convergence.*
 
-## Setup
+## Download and run
 
-On macOS:
+Select a ZIP from [Releases](https://github.com/yoneoka-katsuhiro/Cladistica/releases), extract the entire folder, and open a terminal in that folder. Keep `_internal` beside the executable. These are command-line packages; they do not open a desktop window.
 
-```bash
-bash setup_mac.sh
-```
+| Package | Platform | What is included |
+| --- | --- | --- |
+| `Cladistica-0.2.0-macOS-arm64.zip` | Apple Silicon Mac | CLI, Python runtime, examples, both manuals |
+| `Cladistica-0.2.0-Windows-x64.zip` | Windows x64 | CLI, Python runtime, examples, both manuals |
 
-Create `.env` from the example file and enter the contact email required by
-NCBI Entrez:
+The macOS package is not notarized; the Windows package is not Authenticode signed. The release page records the build and validation status of each asset. Automated Windows checks do not establish that every external-tool workflow has been tested on a physical Windows PC. Intel Macs can use the Python installation below.
 
-```bash
-cp .env.example .env
-```
+**macOS:** `./cladistica --help`
+**Windows PowerShell:** `.\cladistica.exe --help`
 
-```text
-NCBI_EMAIL=your.email@example.com
-```
+MUSCLE, IQ-TREE and MrBayes are **separate installations**. Set their paths using `--muscle`, `--iqtree`, and `--mrbayes`, or place their executables on `PATH`. The Python-only dry run needs none of these tools. See the [installation guide](docs/MANUAL.en.md#installation).
 
-Confirm that the external programs are available before starting a long run:
+For a source installation, download or clone this repository, open its folder, and run:
 
 ```bash
-command -v muscle
-command -v iqtree3 || command -v iqtree2 || command -v iqtree
-command -v mb
+python -m venv .venv
+# macOS/Linux: source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install .
+cladistica --help
 ```
 
-## Marker selection
+Python 3.10 or later is required for a source installation. There is no requirement to install this package from PyPI.
 
-In Cladistica v0.1.3, `--markers` can specify markers beyond predefined loci
-such as `rbcL`. When sequences are retrieved automatically from GenBank, each
-record must contain annotations that allow Cladistica to identify the requested
-marker.
+## A typical analysis
 
-Cladistica checks the following GenBank feature qualifiers:
-
-- `gene`
-- `standard_name`
-- `label`
-- `locus_tag`
-- `product`
-- `note`
-- `function`
-
-The title or description can also identify a marker when the GenBank record is
-a short, marker-specific sequence. Intergenic regions and introns require
-identifiable annotated boundaries. Cladistica does not identify unannotated
-regions by sequence similarity.
-
-Specify the markers used in your study explicitly. For example:
+1. Use `survey` to collect GenBank candidates. Review specimen identity, vouchers, marker boundaries and coverage in `accession_all.csv`.
+2. Save a curated `accession_selected.csv` with one row per sample and at most one accession per marker cell. Give every specimen a stable `sample_id` shared across loci.
+3. Use `resume` to download those sequences, merge your marker FASTA files, align, concatenate and infer trees.
+4. Inspect alignment QC, ML support, independent BI traces, effective sample size and convergence before interpreting a tree.
 
 ```bash
---markers rbcL atpA atpB
+cladistica resume --concatenated-fasta examples/tiny.fasta --output demo_run --skip-ml --ngen 2000
+cladistica resume-bi --bundle demo_run --output demo_extended --ngen 4000
 ```
 
-An additional marker such as `GapCp` can be requested in the same way:
+Use `./cladistica` or `.\cladistica.exe` in place of `cladistica` when using a downloaded package. These two commands require MrBayes. For a dependency-free preview:
 
 ```bash
---markers GapCp
+cladistica tree --input examples --output demo_preview --dry-run
 ```
 
-## 1. Create an accession survey from NCBI
+## Bayesian runs now remain resumable
 
-Use `survey` to search GenBank and create an accession table without running a
-phylogenetic analysis:
+Version 0.2.0 retains the complete `BI_resume/` directory: checkpoint and backup, tree samples, parameter samples, diagnostics, analysis script, command logs and a hash manifest. Raw stages also remain under `_work/`, including after interruption.
 
-```bash
-bash run_cladistica.sh survey \
-  --genus Hymenasplenium \
-  --outgroup "Asplenium setoi" "Asplenium nidus" \
-  --markers rbcL atpA atpB \
-  --email "your.email@example.com"
-```
+`resume-bi` checks input integrity, sample identity, required files, the MrBayes version and the target generation. It copies the original run into a **new** output directory before using `append=yes`. `--ngen 4000000` means a total target of four million generations. The source bundle stays unchanged.
 
-The results are written to a dated directory such as `output/20260910_1/`:
+The older `resume` command starts a new analysis from sequence data; it does not continue MCMC. Old results containing only `BI.tre`, `BI.nex` and `.p` traces cannot reconstruct missing checkpoints or tree samples. See [BI recovery and extension](docs/MANUAL.en.md#bi-recovery-and-extension).
 
-```text
-accession_all.csv
-summly.txt
-run.log
-```
+## Methods and scope
 
-`accession_all.csv` lists the GenBank candidates and Cladistica's automatic
-selection recommendation. Review this table manually, retain the samples and
-accessions required for your study, and save the selected rows as
-`accession_selected.csv`.
+Cladistica extracts annotated CDS, tRNA, rRNA, intron and intergenic markers. It does not infer unannotated marker boundaries by sequence similarity. IQ-TREE uses partitioned `MFP+MERGE` model selection and standard nonparametric bootstrap. BI uses partitioned GTR+Gamma with explicit priors and chain settings in `BI.nex`; it does not automatically adopt IQ-TREE's selected models.
 
-For a short test search, add `--retmax 100`. Without `--retmax`, `survey`
-retrieves all matching search results.
+Defaults are starting settings, not a guarantee that a dataset is appropriate for concatenation or that an analysis converged. Outgroup inclusion does not automatically root the exported tree. The [manual](docs/MANUAL.en.md) explains sample identity, missing data, outputs and limitations.
 
-## 2. Combine selected accessions with your own sequences
+## Development and citation
 
-Prepare the two inputs:
+[Audit and validation](docs/AUDIT.md) · [Feature ideas](docs/ROADMAP.md) · [Build instructions](docs/DISTRIBUTION.md) · [Citation guidance](CITATIONS.md)
 
-- A manually curated `accession_selected.csv` made from the survey results.
-- One unaligned FASTA file per marker containing your own sequences.
-
-Place your FASTA files in one directory and name each file after its marker:
-
-```text
-input/my_sequences/
-  rbcL.fasta
-  atpA.fasta
-  atpB.fasta
-```
-
-Then run:
-
-```bash
-bash run_cladistica.sh resume \
-  --accession-selected input/accession_selected.csv \
-  --accession-all output/20260910_1/accession_all.csv \
-  --add-fasta-dir input/my_sequences \
-  --markers rbcL atpA atpB \
-  --email "your.email@example.com" \
-  --bootstrap 1000 \
-  --ngen 1000000
-```
-
-Cladistica downloads and extracts the selected GenBank sequences, combines
-them with your sequences, aligns each marker with MUSCLE, concatenates the
-alignments, and runs IQ-TREE and MrBayes.
-
-`--accession-all` is optional, but including it preserves the complete survey
-table with the final results. In each FASTA header, the text before the first
-`|` is treated as the sample ID. Use the same sample ID across markers. If the
-same sample and marker occur in both inputs, the sequence in
-`--add-fasta-dir` takes precedence.
-
-The selected accession table must contain:
-
-- one row per sample;
-- a `taxon` or `sample_id` value for every row;
-- no more than one accession in each marker cell;
-- marker columns matching the names supplied to `--markers`.
-
-## Other starting points
-
-To analyze only your own unaligned marker FASTA files:
-
-```bash
-bash run_cladistica.sh resume \
-  --fasta-dir input/my_sequences \
-  --markers rbcL atpA atpB \
-  --bootstrap 1000 \
-  --ngen 1000000
-```
-
-To start from an aligned, concatenated FASTA file:
-
-```bash
-bash run_cladistica.sh resume \
-  --concatenated-fasta input/concatenated.fasta \
-  --partition-file input/partitions.txt \
-  --bootstrap 1000 \
-  --ngen 1000000
-```
-
-The partition file may be a CSV or TSV containing `marker`, `start`, and `end`
-columns, an IQ-TREE partition file, or a NEXUS file containing charset lines.
-
-## Output
-
-Each `survey`, `resume`, or `run` command creates a dated output directory.
-Repeated runs on the same day receive a sequential suffix:
-
-```text
-output/
-  20260910_1/
-  20260910_2/
-```
-
-A complete analysis can contain:
-
-```text
-accession_all.csv
-accession_selected.csv
-<marker>.fasta
-concatenated.fasta
-partitions.txt
-ML.tre
-BI.tre
-BI.nex
-run1.p
-run2.p
-summly.txt
-run.log
-```
-
-Files that do not apply to the selected starting point are omitted.
-
-Open both `run1.p` and `run2.p` in Tracer and evaluate trace stationarity and
-effective sample size (ESS) before using the BI tree in a publication.
-
-## Citation guidance
-
-Analyses produced with Cladistica may use public sequence records and external
-phylogenetic software. Cite the sequence accessions or datasets used in your
-study and the external tools actually run by your analysis. See
-`CITATIONS.md` for suggested references.
-
-Depending on the workflow, these may include:
-
-- NCBI GenBank and E-utilities for accession discovery and retrieval;
-- Biopython for GenBank parsing and sequence handling;
-- MUSCLE for multiple sequence alignment;
-- IQ-TREE and ModelFinder for model selection and ML inference;
-- MrBayes for BI.
-
-## Individual commands
-
-Each stage can also be run separately:
-
-```bash
-bash run_cladistica.sh accessions --help
-bash run_cladistica.sh download --help
-bash run_cladistica.sh align --help
-bash run_cladistica.sh concat --help
-bash run_cladistica.sh tree --help
-```
+Cladistica is MIT licensed. Cite the public sequences and the external tools actually used. Development follows the small, testable changes, explicit inputs and reproducible outputs described in [ai-biocode-kata](https://github.com/dritoshi/ai-biocode-kata/tree/main/chapters).

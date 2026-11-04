@@ -39,8 +39,14 @@ def collect_marker_records(marker: str, genbank_dir: Path, user_dir: Path) -> tu
     duplicates: list[dict[str, object]] = []
     for source, base_dir in (("genbank", genbank_dir), ("user", user_dir)):
         path = marker_fasta_path(base_dir, marker)
+        source_samples: set[str] = set()
         for header, sequence in read_fasta(path).items():
             sample_id = sample_id_from_header(header)
+            if not sample_id:
+                raise ValueError(f"Empty sample ID in marker FASTA: {path}")
+            if sample_id in source_samples:
+                raise ValueError(f"Duplicate sample ID {sample_id!r} in marker FASTA: {path}")
+            source_samples.add(sample_id)
             existing_header = next((key for key in combined if sample_id_from_header(key) == sample_id), "")
             if existing_header:
                 duplicates.append(

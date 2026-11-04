@@ -137,8 +137,8 @@ def accession_from_record(record: object) -> str:
     accessions = annotations.get("accessions")
     if isinstance(accessions, list) and accessions:
         return str(accessions[0])
-    for field in PRIMARY_ACCESSION_FIELDS:
-        value = getattr(record, field, "")
+    for field_name in PRIMARY_ACCESSION_FIELDS:
+        value = getattr(record, field_name, "")
         if value:
             return str(value).split()[0]
     return ""
