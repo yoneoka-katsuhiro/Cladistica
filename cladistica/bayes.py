@@ -64,6 +64,20 @@ def process_is_running(pid: int) -> bool:
     return True
 
 
+def require_stopped_run(state: dict) -> None:
+    """A dead launcher does not prove that its MrBayes child has stopped."""
+    if state.get("status") != "running":
+        return
+    if state.get("host") != socket.gethostname():
+        raise ValueError("Source run has an unfinished status on another host. Recover it on the original host first.")
+    for name in ("pid", "child_pid"):
+        pid = state.get(name)
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+            raise ValueError("Cannot verify that the source BI run has stopped: parent/child PID is missing. Preserve the bundle for expert recovery; automatic resume is refused.")
+        if process_is_running(pid):
+            raise ValueError("The source BI run or its MrBayes child is still active. Stop both before copying/resuming its samples.")
+
+
 def resolve_command(command: str) -> str:
     found = shutil.which(command)
     if not found:
@@ -133,10 +147,15 @@ def execute_bayes(
     directory: Path, command: str, state: dict,
     runner: Callable, on_line: Callable[[str], None] | None = None,
 ) -> None:
-    state.update(status="running", pid=os.getpid(), host=socket.gethostname(), files={})
+    state.update(status="running", pid=os.getpid(), child_pid=None, host=socket.gethostname(), files={})
     save_manifest(directory, state)
+
+    def record_child(pid: int) -> None:
+        state["child_pid"] = pid
+        save_manifest(directory, state)
+
     try:
-        runner([command, ANALYSIS], directory, directory / "run_mrbayes.log", on_line=on_line)
+        runner([command, ANALYSIS], directory, directory / "run_mrbayes.log", on_line=on_line, on_start=record_child)
         for path in sample_paths(directory, int(state["nruns"])):
             if not path.is_file() or not path.stat().st_size:
                 raise RuntimeError(f"MrBayes did not produce {path.name}; inspect run_mrbayes.log.")
@@ -182,11 +201,7 @@ def resume_bayes(*, bundle: Path, output_dir: Path, ngen: int, command: str = "m
     if not manifest.is_file():
         raise ValueError("No resume_manifest.json found. Select BI_resume or _work/trees/03_mrbayes from Cladistica 0.2+.")
     state = json.loads(manifest.read_text(encoding="utf-8"))
-    if state.get("status") == "running":
-        if state.get("host") != socket.gethostname():
-            raise ValueError("Source run has an unfinished status on another host. Recover it on the original host first.")
-        if process_is_running(int(state["pid"])):
-            raise ValueError("The source BI run is still active. Stop it before copying/resuming its samples.")
+    require_stopped_run(state)
     generation = verify_bundle(bundle, state)
     if ngen <= generation or ngen % 1000:
         raise ValueError(f"--ngen is the total target, must exceed checkpoint generation {generation}, and must be a multiple of 1000.")

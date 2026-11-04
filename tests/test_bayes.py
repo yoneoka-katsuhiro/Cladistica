@@ -4,12 +4,19 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
+import socket
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
+from unittest.mock import patch
 
 from cladistica.bayes import (
     ANALYSIS, MANIFEST, checkpoint_generation, resume_bayes, sample_paths,
     save_manifest, sha256, start_bayes, verify_bundle, last_parameter_generation,
+    require_stopped_run,
 )
 from cladistica.package import package_run_outputs
 from cladistica.trees import run_checked, write_mrbayes_nexus
@@ -29,6 +36,75 @@ def make_bundle(directory: Path, nruns: int = 2) -> dict:
 
 
 class BayesResumeTests(unittest.TestCase):
+    def test_dead_parent_does_not_authorize_copying_from_live_child(self):
+        state = dict(status="running", host=socket.gethostname(), pid=10, child_pid=20)
+        with patch("cladistica.bayes.process_is_running", side_effect=lambda pid: pid == 20):
+            with self.assertRaisesRegex(ValueError, "child is still active"):
+                require_stopped_run(state)
+
+    def test_missing_or_invalid_process_ids_are_not_assumed_stopped(self):
+        for field in ("pid", "child_pid"):
+            for invalid in (None, "20", 0, -1, True):
+                state = dict(status="running", host=socket.gethostname(), pid=10, child_pid=20)
+                state[field] = invalid
+                with self.subTest(field=field, value=invalid):
+                    with patch("cladistica.bayes.process_is_running", return_value=False):
+                        with self.assertRaisesRegex(ValueError, "Cannot verify"):
+                            require_stopped_run(state)
+
+    def test_running_bundle_from_another_host_is_rejected(self):
+        state = dict(status="running", host="different-host", pid=10, child_pid=20)
+        with self.assertRaisesRegex(ValueError, "another host"):
+            require_stopped_run(state)
+
+    @unittest.skipIf(os.name == "nt", "POSIX SIGKILL orphan regression; PID policy is tested on all systems")
+    def test_sigkill_parent_leaves_live_child_that_blocks_resume(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bundle = root / "bundle"
+            make_bundle(bundle)
+            # The fake external program survives its launcher without writing
+            # stdout. It reproduces the orphan lifecycle without running MCMC.
+            (bundle / ANALYSIS).write_text("import time\ntime.sleep(60)\n")
+            parent_code = (
+                "import json,sys; from pathlib import Path; "
+                "from cladistica.bayes import execute_bayes, MANIFEST; "
+                "from cladistica.trees import run_checked; "
+                "p=Path(sys.argv[1]); "
+                "execute_bayes(p,sys.executable,json.loads((p/MANIFEST).read_text()),run_checked)"
+            )
+            parent = subprocess.Popen([sys.executable, "-c", parent_code, str(bundle)],
+                                      cwd=Path(__file__).resolve().parents[1],
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            child_pid = None
+            try:
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    state = json.loads((bundle / MANIFEST).read_text())
+                    child_pid = state.get("child_pid")
+                    if child_pid:
+                        break
+                    if parent.poll() is not None:
+                        self.fail("The parent exited before recording its external child")
+                    time.sleep(0.01)
+                self.assertIsInstance(child_pid, int)
+                parent.kill()
+                parent.wait(timeout=5)
+                os.kill(child_pid, 0)  # The real orphan still exists.
+                with patch("cladistica.bayes.resolve_command", side_effect=AssertionError("live source reached execution")):
+                    with self.assertRaisesRegex(ValueError, "child is still active"):
+                        resume_bayes(bundle=bundle, output_dir=root / "result", ngen=2000)
+                self.assertFalse((root / "result").exists())
+            finally:
+                if parent.poll() is None:
+                    parent.kill()
+                parent.wait(timeout=5)
+                if child_pid:
+                    try:
+                        os.kill(child_pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+
     def test_checkpoint_and_all_runs_are_required(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "bundle"
@@ -148,6 +224,20 @@ class RealMrBayesTests(unittest.TestCase):
             root = Path(temporary)
             start_bayes(root / "initial", self.make_analysis(root, 2000), "mb", ngen=2000, nruns=2, runner=run_checked)
             self.assert_continued(root / "initial", root / "extended", 4000)
+
+    def test_stopped_parent_and_child_allow_recovery_of_running_status(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            start_bayes(root / "initial", self.make_analysis(root, 2000), "mb", ngen=2000, nruns=2, runner=run_checked)
+            # Emulate a launcher killed after its child finished but before the
+            # final state update. Both recorded process IDs are known to be gone.
+            exited_parent = subprocess.Popen([sys.executable, "-c", "pass"])
+            exited_parent.wait(timeout=5)
+            state = json.loads((root / "initial" / MANIFEST).read_text())
+            self.assertIsInstance(state["child_pid"], int)
+            state.update(status="running", pid=exited_parent.pid, files={})
+            save_manifest(root / "initial", state)
+            self.assert_continued(root / "initial", root / "recovered", 4000)
 
     def test_interrupted_run_resumes_from_checkpoint(self):
         with tempfile.TemporaryDirectory() as temporary:

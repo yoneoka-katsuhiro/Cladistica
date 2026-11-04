@@ -114,7 +114,7 @@ If a high-level run stops before packaging:
 cladistica resume-bi --bundle output/my_run/_work/trees/03_mrbayes --output output/recovered --ngen 4000000
 ```
 
-If the standalone `tree` command stops, use its `03_mrbayes/` directory. Stop the source process before resuming. An active local run is rejected. A run whose manifest still says `running` after a hard kill can be recovered on its original host when its recorded process is absent; recovery is refused while that PID exists. A running-status bundle copied from another host must first be recovered on the original host. Ordinary Ctrl-C records an `interrupted` state and is portable once the required files are complete.
+If the standalone `tree` command stops, use its `03_mrbayes/` directory. Stop the source process before resuming. An active local launcher or MrBayes child is rejected. The manifest records both process IDs. A run whose manifest still says `running` after a hard kill can be recovered on its original host only when both recorded processes are absent. Killing the launcher alone may leave MrBayes running; stop the child too before resuming. A running-status bundle copied from another host must first be recovered on the original host. Ordinary Ctrl-C records an `interrupted` state and is portable once the required files are complete. If an older manifest lacks the child PID, or the launcher was killed before it could record that PID, Cladistica cannot establish that all writers stopped and refuses automatic recovery. Keep the complete bundle for expert recovery with native MrBayes after independently confirming that the analysis has stopped; do not bypass the manifest check. PID reuse may conservatively prevent automatic recovery.
 
 A crash before the first checkpoint, or during checkpoint replacement, can leave no usable current `.ckp`. The backup is retained for expert recovery but Cladistica does not silently substitute it. Missing or damaged checkpoint/tree files require a verified backup or a new analysis. Old 0.1.x flat results that lack `.ckp` and `.t` cannot be resumed from `.p` and the consensus tree alone.
 
@@ -133,7 +133,7 @@ High-level commands write dated directories under `output/` unless `--output` is
 
 `_work/` and `BI_resume/` duplicate BI files after a successful workflow. Budget disk space for both copies, and keep a backup of the full result. Deleting `_work/` after validating and backing up a complete `BI_resume/` is a manual storage choice; Cladistica never performs that cleanup automatically.
 
-`package --run-dir RAW_RUN --output NEW_DIRECTORY --archive results.zip` collects a staged run and its BI bundle. Output cannot replace the source directory or its parent. Zip archives can be large because tree and parameter samples are included.
+`package --run-dir RAW_RUN --output NEW_DIRECTORY --archive results.zip` collects a staged run and its BI bundle. Output cannot replace the source directory or its parent. The archive path must not exist and must be outside both the raw source run and the packaged output directory. These conditions are checked before any result copying. A complete temporary ZIP is published atomically without replacing a destination created by another process; publication requires filesystem hard-link support (for example APFS or NTFS). Unsupported filesystems fail without overwriting existing data. Zip archives can be large because tree and parameter samples are included.
 
 ## Troubleshooting
 

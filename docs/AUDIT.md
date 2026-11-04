@@ -16,9 +16,11 @@ Audit date: 2026-11-04–05. Scope: the public Cladistica repository, with prior
 
 Changes follow [ai-biocode-kata](https://github.com/dritoshi/ai-biocode-kata/tree/main/chapters), especially design (§1), testing (§8), debugging (§9), deliverables (§10), documentation (§18), and the final checklist. The BI lifecycle is isolated in one module; regression tests target data-loss/identity failures rather than mirroring helper implementation. Existing biological algorithms were not rewritten to claim improved scientific validity.
 
+Additional release review found and fixed three reproducible failures: an arbitrary existing `--archive` path could be truncated; a parent killed with SIGKILL could leave a live MrBayes child whose samples were still writable; and an unclosed read-only Excel workbook caused Windows frozen self-check cleanup to fail with WinError 32. Regression cases now cover archive preflight and concurrent creation, a real orphan child, stopped-parent/child checkpoint recovery, and populated/empty/failed Excel reads with retained workbook references. Archive publication is complete-file, atomic and exclusive; unsupported hard-link filesystems fail without replacing user data.
+
 ## Verification
 
-- Local verification: all 100 tests passed with real MrBayes tests enabled (2026-11-05); Python compilation also passed.
+- Local verification: all 113 tests passed with real MrBayes tests enabled (2026-11-05); Python compilation also passed.
 - Offline tests cover accession selection, marker extraction, reverse-strand/circular boundaries, FASTA identity, concatenation, packaging, progress, input validation and BI bundle checks.
 - Real MrBayes 3.2.7a on macOS arm64: a synthetic four-taxon matrix completed at 2,000 generations, continued to 4,000, and retained generations 0/1000/2000/3000/4000 without duplicated sample rows. The source bundle hashes remained unchanged.
 - Real interruption test: a long target was interrupted after checkpoint production; a new run resumed from the retained checkpoint and reached its new target while retaining the earlier sample series.
@@ -42,7 +44,7 @@ The environment-variable example is Bash syntax. In PowerShell set `$env:CLADIST
 - ML/BI completion is not convergence. ESS, split frequencies, stationarity, model adequacy, orthology and alignment quality still require review.
 - Full native Windows inference with independently installed MUSCLE/IQ-TREE/MrBayes has not been established by local macOS tests. External binaries are not bundled.
 - Crash recovery requires a valid checkpoint and matching samples. A crash during checkpoint replacement may require expert use of the preserved backup; the program does not auto-promote `.ckp~`.
-- A hard-killed run with `running` status can be recovered only on its original host after its recorded PID is absent. PID reuse may conservatively block recovery; it never authorizes overwriting the original.
+- A hard-killed run with `running` status can be recovered only on its original host after both recorded parent and child PIDs are absent. Missing/invalid PID metadata and PID reuse conservatively block automatic recovery; a dead launcher alone does not authorize copying samples.
 - Old results that already lost checkpoint/tree samples are not recoverable from traces alone. No software change can reconstruct the absent chain state.
 - Retained `_work` plus `BI_resume` increases disk usage. Automatic cleanup and diagnostic dashboards remain proposals in [ROADMAP](ROADMAP.md).
 

@@ -24,23 +24,33 @@ def read_xlsx(path: Path) -> tuple[list[dict[str, str]], list[str]]:
         from openpyxl import load_workbook  # type: ignore
     except ImportError as exc:
         raise RuntimeError("openpyxl is required to read .xlsx files. Install dependencies from requirements.txt.") from exc
-    workbook = load_workbook(path, read_only=True, data_only=True)
-    sheet = workbook.active
-    rows_iter = sheet.iter_rows(values_only=True)
-    header_values = next(rows_iter, None)
-    if not header_values:
-        return [], []
-    fieldnames = [str(value).strip() if value is not None else "" for value in header_values]
-    rows: list[dict[str, str]] = []
-    for values in rows_iter:
-        row = {
-            fieldnames[index]: "" if value is None else str(value)
-            for index, value in enumerate(values)
-            if index < len(fieldnames) and fieldnames[index]
-        }
-        if any(value for value in row.values()):
-            rows.append(row)
-    return rows, [field for field in fieldnames if field]
+    # Own the file descriptor so constructor/iteration failures also release it.
+    # Windows cannot rename/delete an XLSX while its ZIP archive remains open.
+    with path.open("rb") as source:
+        workbook = load_workbook(source, read_only=True, data_only=True)
+        rows_iter = None
+        try:
+            rows_iter = workbook.active.iter_rows(values_only=True)
+            header_values = next(rows_iter, None)
+            if not header_values:
+                return [], []
+            fieldnames = [str(value).strip() if value is not None else "" for value in header_values]
+            rows: list[dict[str, str]] = []
+            for values in rows_iter:
+                row = {
+                    fieldnames[index]: "" if value is None else str(value)
+                    for index, value in enumerate(values)
+                    if index < len(fieldnames) and fieldnames[index]
+                }
+                if any(value for value in row.values()):
+                    rows.append(row)
+            return rows, [field for field in fieldnames if field]
+        finally:
+            try:
+                if rows_iter is not None:
+                    rows_iter.close()
+            finally:
+                workbook.close()
 
 
 def read_table(path: Path) -> tuple[list[dict[str, str]], list[str]]:

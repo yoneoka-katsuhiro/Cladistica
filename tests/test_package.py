@@ -4,11 +4,79 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
-from cladistica.package import package_run_outputs
+from cladistica.package import package_run_outputs, write_zip
 
 
 class PackageTests(unittest.TestCase):
+    def test_existing_archive_cannot_destroy_original_input_before_packaging(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            original = root / "original.fasta"
+            original.write_bytes(b">irreplaceable\nACGT\n")
+            with self.assertRaises(FileExistsError):
+                package_run_outputs(run_dir=source, output_dir=root / "output", archive_path=original)
+            self.assertEqual(original.read_bytes(), b">irreplaceable\nACGT\n")
+            self.assertFalse((root / "output").exists())
+
+    def test_archive_inside_source_or_output_is_rejected_before_copying(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, output = root / "source", root / "output"
+            source.mkdir()
+            for archive in (source / "results.zip", output / "results.zip"):
+                with self.subTest(archive=archive):
+                    with self.assertRaisesRegex(ValueError, "outside"):
+                        package_run_outputs(run_dir=source, output_dir=output, archive_path=archive)
+                    self.assertFalse(output.exists())
+                    self.assertFalse(archive.exists())
+
+    def test_direct_zip_call_does_not_overwrite_existing_archive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            archive = root / "original.zip"
+            archive.write_bytes(b"previous archive")
+            with self.assertRaises(FileExistsError):
+                write_zip(source, archive)
+            self.assertEqual(archive.read_bytes(), b"previous archive")
+
+    def test_archive_created_during_compression_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            (source / "data").write_bytes(b"data to compress")
+            destination = root / "result.zip"
+            original_write = zipfile.ZipFile.write
+
+            def concurrent_writer(archive, *args, **kwargs):
+                destination.write_bytes(b"a concurrent writer's result")
+                return original_write(archive, *args, **kwargs)
+
+            with patch("cladistica.package.zipfile.ZipFile.write", concurrent_writer):
+                with self.assertRaises(FileExistsError):
+                    write_zip(source, destination)
+            self.assertEqual(destination.read_bytes(), b"a concurrent writer's result")
+            self.assertEqual(set(root.iterdir()), {source, destination})
+
+    def test_failed_compression_never_publishes_a_partial_archive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            (source / "data").write_bytes(b"original data")
+            destination = root / "result.zip"
+            with patch("cladistica.package.zipfile.ZipFile.write", side_effect=OSError("disk full")):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    write_zip(source, destination)
+            self.assertEqual(list(root.iterdir()), [source])
+            self.assertEqual((source / "data").read_bytes(), b"original data")
+
     def test_packages_flat_results_and_complete_bi_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

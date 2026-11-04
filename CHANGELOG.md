@@ -12,10 +12,14 @@
 - Preserve specimen identity across loci when selected accession rows omit `sample_id`. Earlier fallback IDs incorporated the per-marker accession and split one specimen across concatenated rows. Reject normalized ID collisions and unsafe delimiters.
 - Store default CLI outputs in the working directory, including installed and frozen distributions.
 
+- Refuse existing or source/output-contained ZIP paths before copying, and publish completed archives exclusively so a concurrent file cannot be overwritten.
+- Record and check both launcher and MrBayes child PIDs before recovering a hard-killed run; refuse unverified legacy running states.
+- Close Excel file, worksheet iterator and workbook on success, empty input and parsing errors, fixing frozen Windows self-check file locks.
+
 ### Added
 
 - English/Japanese overview and manuals, actual synthetic BI output illustration, audit report and prioritized feature proposals.
-- Native macOS arm64 and Windows x64 build workflows, frozen CLI smoke checks, dependency inventory, license collection and archive checksums.
+- Native macOS arm64 and Windows x64 build workflows, frozen CLI smoke checks, dependency inventory, source commit/dirty-state provenance, license collection and archive checksums.
 - Offline regression tests and opt-in real MrBayes completed/interrupted continuation tests.
 
 ### Compatibility

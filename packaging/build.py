@@ -61,8 +61,14 @@ def main() -> None:
         if path.is_file():
             shutil.copy2(path, licenses / "Python-LICENSE.txt")
             break
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL).strip()
+        uncommitted_changes = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL).strip())
+    except (OSError, subprocess.CalledProcessError):
+        commit, uncommitted_changes = "unavailable", None
     (bundle / "BUILD_INFO.json").write_text(json.dumps({
         "cladistica_version": __version__, "python": sys.version,
+        "commit": commit, "uncommitted_changes": uncommitted_changes,
         "platform": platform.platform(), "architecture": platform.machine(),
         "build_environment_packages": dependencies,
         "external_tools_included": False,

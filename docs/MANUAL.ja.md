@@ -114,7 +114,7 @@ cladistica resume-bi --bundle output/my_run --output output/my_run_extended --ng
 cladistica resume-bi --bundle output/my_run/_work/trees/03_mrbayes --output output/recovered --ngen 4000000
 ```
 
-単独の`tree`コマンドなら、その出力内の`03_mrbayes/`を指定します。元の解析を停止してから再開してください。実行中のローカルrunは拒否します。強制終了でmanifestが`running`のまま残った場合、元のホストで記録PIDが存在しなければ再開できます。そのPIDが存在する間は拒否します。別ホストへコピーした`running`状態のbundleは、まず元ホストで復旧してください。通常のCtrl-Cでは`interrupted`が記録され、必要ファイルが揃えば移動後も再開できます。
+単独の`tree`コマンドなら、その出力内の`03_mrbayes/`を指定します。元の解析を停止してから再開してください。実行中のCladistica親プロセスまたはMrBayes子プロセスがあれば拒否します。manifestには両方のPIDを記録します。強制終了で`running`のまま残った場合、元ホストで両方のPIDが存在しないことを確認してから再開します。親だけを終了してもMrBayesが動き続ける場合があるため、子の終了も必要です。別ホストへコピーした`running`状態のbundleは、まず元ホストで復旧してください。通常のCtrl-Cでは`interrupted`が記録され、必要ファイルが揃えば移動後も再開できます。子PIDのない古いmanifestや、子PIDを記録する直前に親が終了した場合は、全書込みプロセスの終了を確認できないため自動再開を拒否します。一式を保持し、解析の停止を別途確認したうえでMrBayes本体による専門的な復旧を行ってください。manifestのチェックは回避しないでください。PIDの再利用によって保守的に再開が拒否される場合もあります。
 
 最初のcheckpoint作成前やcheckpointの書換え途中に停止すると、正常な現在の`.ckp`がない場合があります。バックアップは専門的な復旧のために保存しますが、Cladisticaは自動で差し替えません。checkpointや樹形サンプルを失った場合は、確認済みのバックアップか新規解析が必要です。旧0.1.xの`.p`や合意樹だけから、失われた`.ckp`と`.t`を復元することはできません。
 
@@ -133,7 +133,7 @@ cladistica resume-bi --bundle output/my_run/_work/trees/03_mrbayes --output outp
 
 正常終了後は`_work/`と`BI_resume/`の両方にBIファイルが存在します。両方の容量を見積もり、結果一式をバックアップしてください。完全な`BI_resume/`を検証・バックアップした後に`_work/`を削除するかどうかは利用者が判断します。自動削除は行いません。
 
-`package --run-dir RAW_RUN --output NEW_DIRECTORY --archive results.zip`は工程別出力とBI一式をまとめます。元のディレクトリやその親への上書きは拒否します。樹形・パラメータサンプルを含むため、ZIPは大きくなることがあります。
+`package --run-dir RAW_RUN --output NEW_DIRECTORY --archive results.zip`は工程別出力とBI一式をまとめます。元のディレクトリやその親への上書きは拒否します。ZIPの保存先は未作成のパスとし、元のrunと成果物ディレクトリの外側に置いてください。コピー開始前に検証します。ZIPは一時ファイルで完成させてから、競合する既存ファイルを置き換えず原子的に公開します。保存先にはAPFSやNTFSなどハードリンク対応のファイルシステムが必要です。非対応の場合も既存データを上書きせず失敗します。樹形・パラメータサンプルを含むため、ZIPは大きくなることがあります。
 
 ## 困ったとき
 

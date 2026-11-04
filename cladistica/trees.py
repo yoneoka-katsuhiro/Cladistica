@@ -154,6 +154,7 @@ def run_checked(
     log_path: Path,
     *,
     on_line: Callable[[str], None] | None = None,
+    on_start: Callable[[int], None] | None = None,
 ) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as log:
@@ -167,6 +168,8 @@ def run_checked(
             bufsize=1,
         )
         try:
+            if on_start:
+                on_start(process.pid)
             if process.stdout is None:
                 raise RuntimeError("External command output stream was not created.")
             for raw_line in process.stdout:
