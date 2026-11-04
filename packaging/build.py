@@ -10,11 +10,69 @@ import platform
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from cladistica import __version__  # noqa: E402
+
+
+def copy_runtime_licenses(bundle: Path) -> None:
+    """Preserve interpreter and native-library notices without confusing an EULA with PSF."""
+    destination = bundle / "THIRD_PARTY_LICENSES"
+    destination.mkdir(exist_ok=True)
+    base = Path(sys.base_prefix)
+    python_license = None
+    for directory in (Path(sysconfig.get_path("stdlib")), base):
+        for name in ("LICENSE.txt", "LICENSE"):
+            source = directory / name
+            if source.is_file() and "Python Software Foundation" in source.read_text(encoding="utf-8", errors="replace"):
+                python_license = source
+                break
+        if python_license is not None:
+            break
+    if python_license is None:
+        raise RuntimeError("Python PSF license was not found; provide it before distributing this build.")
+    shutil.copy2(python_license, destination / "Python-LICENSE.txt")
+    for name in ("LICENSE.txt", "LICENSE"):
+        source = base / name
+        if source.is_file() and source.resolve() != python_license.resolve():
+            shutil.copy2(source, destination / "Python-distribution-LICENSE.txt")
+            break
+
+    metadata_dir = base / "conda-meta"
+    if not metadata_dir.is_dir():
+        return
+    binary_names = {path.name for path in (bundle / "_internal").iterdir()
+                    if path.is_file() and (path.suffix.lower() in (".dylib", ".dll") or ".so" in path.name)}
+    for metadata in sorted(metadata_dir.glob("*.json")):
+        record = json.loads(metadata.read_text(encoding="utf-8"))
+        matched = sorted({Path(name).name for name in record.get("files", [])} & binary_names)
+        if not matched:
+            continue
+        cache = Path(record.get("extracted_package_dir") or record.get("link", {}).get("source")
+                     or base / "pkgs" / metadata.stem)
+        notices = cache / "info" / "licenses"
+        target = destination / "conda-runtime" / metadata.stem
+        about_path = cache / "info" / "about.json"
+        about = json.loads(about_path.read_text(encoding="utf-8")) if about_path.is_file() else {}
+        if notices.is_dir():
+            shutil.copytree(notices, target, dirs_exist_ok=True)
+        elif record.get("name") in ("sqlite", "libsqlite") and record.get("license") == "blessing":
+            # Some SQLite packages provide their public-domain declaration and
+            # upstream license URL in about.json instead of info/licenses.
+            if not about.get("license_url") or "public-domain" not in about.get("description", "").lower():
+                raise RuntimeError(f"Missing public-domain declaration for {metadata.stem}")
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            raise RuntimeError(f"Missing native-library license notices for {metadata.stem}")
+        summary = {key: record.get(key) or about.get(key)
+                   for key in ("name", "version", "build", "license", "home", "license_url")}
+        summary["bundled_library_names"] = matched
+        if record.get("name") in ("sqlite", "libsqlite"):
+            summary["upstream_description"] = about.get("description", "")
+        (target / "PACKAGE_LICENSE_INFO.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> None:
@@ -26,6 +84,7 @@ def main() -> None:
         "--collect-submodules", "Bio.SeqIO", "--collect-submodules", "Bio.AlignIO",
         "--exclude-module", "matplotlib", "--exclude-module", "IPython",
         "--exclude-module", "tkinter", "--exclude-module", "pytest",
+        "--exclude-module", "readline",
         str(ROOT / "packaging/entrypoint.py"),
     ], cwd=ROOT, check=True, env=build_env)
     bundle = ROOT / "dist/cladistica"
@@ -57,10 +116,7 @@ def main() -> None:
                     target = licenses / name / str(item).replace("../", "parent/")
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, target)
-    for path in (Path(sys.base_prefix) / "LICENSE.txt", Path(sys.base_prefix) / "LICENSE"):
-        if path.is_file():
-            shutil.copy2(path, licenses / "Python-LICENSE.txt")
-            break
+    copy_runtime_licenses(bundle)
     try:
         commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL).strip()
         uncommitted_changes = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL).strip())
