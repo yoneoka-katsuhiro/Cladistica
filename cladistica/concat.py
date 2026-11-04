@@ -24,11 +24,16 @@ def marker_input_path(input_dir: Path, marker: str) -> Path | None:
 
 def read_aligned_marker(path: Path) -> tuple[OrderedDict[str, str], int]:
     raw = read_fasta(path)
+    if not raw:
+        raise ValueError(f"Empty alignment: {path}")
     records: OrderedDict[str, str] = OrderedDict()
     for header, sequence in raw.items():
         sample_id = sample_id_from_header(header)
-        if sample_id not in records:
-            records[sample_id] = sequence.upper()
+        if not sample_id:
+            raise ValueError(f"Empty sample ID in alignment: {path}")
+        if sample_id in records:
+            raise ValueError(f"Duplicate sample ID {sample_id!r} in alignment: {path}")
+        records[sample_id] = sequence.upper()
     lengths = {len(sequence) for sequence in records.values()}
     if len(lengths) > 1:
         raise ValueError(f"Alignment has inconsistent lengths: {path}")

@@ -9,6 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 import re
 
+from .bayes import start_bayes
 from .io import read_fasta, read_tsv, write_tsv
 from .models import PipelineResult
 from .progress import PipelineProgress
@@ -125,10 +126,10 @@ def write_mrbayes_nexus(
         [
             "  lset nst=6 rates=gamma;",
             "  prset statefreqpr=dirichlet(1,1,1,1);",
-            f"  mcmcp ngen={ngen} nruns={nruns} nchains={nchains} samplefreq=1000 printfreq=1000 diagnfreq=5000 burninfrac={burninfrac};",
+            f"  mcmcp ngen={ngen} nruns={nruns} nchains={nchains} samplefreq=1000 printfreq=1000 diagnfreq=5000 checkpoint=yes checkfreq=1000 filename=mrbayes_analysis.nex burninfrac={burninfrac};",
             "  mcmc;",
-            "  sump;",
-            "  sumt;",
+            f"  sump relburnin=yes burninfrac={burninfrac};",
+            f"  sumt relburnin=yes burninfrac={burninfrac};",
             "end;",
         ]
     )
@@ -159,6 +160,7 @@ def run_checked(
         process = subprocess.Popen(
             command,
             cwd=cwd,
+            stdin=subprocess.DEVNULL,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -416,6 +418,10 @@ def run_tree_analyses(
     dry_run: bool = False,
     progress: PipelineProgress | None = None,
 ) -> PipelineResult:
+    if not skip_bi and (ngen < 1000 or ngen % 1000 or nruns < 1 or nchains < 1 or not 0 <= burninfrac < 1):
+        raise ValueError("BI requires ngen >= 1000 in multiples of 1000, positive nruns/nchains, and 0 <= burninfrac < 1.")
+    if not skip_bi and not dry_run and (output_dir / "03_mrbayes").exists() and any((output_dir / "03_mrbayes").iterdir()):
+        raise ValueError("BI output already exists. Use resume-bi or a new output directory.")
     fasta_candidates = sorted(input_dir.glob("*.fasta")) + sorted(input_dir.glob("*.fa")) + sorted(input_dir.glob("*.fas"))
     if not fasta_candidates:
         raise FileNotFoundError(f"No concatenated FASTA file was found in {input_dir}")
@@ -506,16 +512,15 @@ def run_tree_analyses(
         if progress:
             progress.start("bi")
         bi_dir = output_dir / "03_mrbayes"
-        bi_dir.mkdir(parents=True, exist_ok=True)
-        analysis_copy = bi_dir / mrbayes_nexus.name
-        analysis_copy.write_text(mrbayes_nexus.read_text(encoding="utf-8"), encoding="utf-8")
         mrbayes_progress = MrBayesProgressParser(progress, ngen) if progress else None
-        run_checked(
-            [mrbayes or "mb", analysis_copy.name],
-            bi_dir,
-            output_dir / "run_mrbayes.log",
-            on_line=mrbayes_progress,
-        )
+        try:
+            start_bayes(
+                bi_dir, mrbayes_nexus, mrbayes or "mb", ngen=ngen, nruns=nruns,
+                runner=run_checked, on_line=mrbayes_progress,
+            )
+        finally:
+            if (bi_dir / "run_mrbayes.log").exists():
+                shutil.copy2(bi_dir / "run_mrbayes.log", output_dir / "run_mrbayes.log")
         if mrbayes_progress:
             mrbayes_progress.finish()
         completed += 1

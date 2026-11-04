@@ -120,6 +120,7 @@ def write_flat_summary(work_dir: Path, output_dir: Path) -> None:
         "BI.nex": "executable MrBayes analysis file, including charset definitions.",
         "ML.tre": "IQ-TREE maximum-likelihood tree.",
         "BI.tre": "MrBayes consensus tree.",
+        "BI_resume": "Complete BI continuation bundle: checkpoint, tree/parameter samples, diagnostics, manifest and logs. Keep the entire directory.",
         "run1.p": "MrBayes run 1 parameter trace for Tracer.",
         "run2.p": "MrBayes run 2 parameter trace for Tracer.",
         "run.log": "combined query, QC, IQ-TREE, and MrBayes log.",
@@ -152,6 +153,12 @@ def package_run_outputs(
 ) -> PipelineResult:
     """Create one flat, reader-facing result directory from temporary stage outputs."""
     warnings: list[str] = []
+    source = run_dir.resolve()
+    destination = output_dir.resolve()
+    if source == destination or (reset_output and destination in source.parents):
+        raise ValueError("Packaging output must not replace the source run or its parent.")
+    if reset_output and output_dir.exists() and any(output_dir.iterdir()):
+        raise ValueError("Packaging output is not empty; choose a new directory to protect existing results.")
     if reset_output:
         reset_directory(output_dir)
     else:
@@ -198,6 +205,9 @@ def package_run_outputs(
         warnings.append("missing: concatenated stage output")
 
     if tree_dir:
+        bi_source = tree_dir / "03_mrbayes"
+        if bi_source.is_dir():
+            shutil.copytree(bi_source, output_dir / "BI_resume", dirs_exist_ok=True)
         required_tree_files = {"partitions.txt"}
         if expect_ml:
             required_tree_files.add("ML.tre")

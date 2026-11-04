@@ -9,7 +9,7 @@ from cladistica.package import package_run_outputs
 
 
 class PackageTests(unittest.TestCase):
-    def test_packages_only_required_flat_files(self) -> None:
+    def test_packages_flat_results_and_complete_bi_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_dir = root / "run"
@@ -63,11 +63,12 @@ class PackageTests(unittest.TestCase):
                 "run.log",
             }
             self.assertEqual(result.records_written, len(expected))
-            self.assertEqual({path.name for path in output_dir.iterdir()}, expected)
+            self.assertEqual({path.name for path in output_dir.iterdir()}, expected | {"BI_resume"})
             self.assertEqual(result.warnings, [])
             self.assertIn(">B", (output_dir / "rbcL.fasta").read_text(encoding="utf-8"))
             with zipfile.ZipFile(archive_path) as archive:
-                self.assertEqual(set(archive.namelist()), expected)
+                self.assertTrue(expected.issubset(archive.namelist()))
+                self.assertIn("BI_resume/mrbayes_analysis.nex.run1.p", archive.namelist())
 
 
 if __name__ == "__main__":

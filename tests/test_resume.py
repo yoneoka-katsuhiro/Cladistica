@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -100,7 +101,7 @@ class ResumeWorkflowTests(unittest.TestCase):
                     partition_file=None,
                     output_dir=output,
                     markers=["rbcL"],
-                    muscle_command="true",
+                    muscle_command=sys.executable,
                 )
 
             merged = read_fasta(output / "rbcL.fasta")
@@ -139,7 +140,7 @@ class ResumeWorkflowTests(unittest.TestCase):
                     output_dir=output,
                     email="researcher@example.org",
                     markers=["rbcL"],
-                    muscle_command="true",
+                    muscle_command=sys.executable,
                 )
 
             self.assertEqual(result.records_written, 2)

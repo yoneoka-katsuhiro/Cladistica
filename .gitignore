@@ -12,3 +12,10 @@ deliverable/
 output_test_*.stdout
 output_test_*.stderr
 *.log
+
+.venv-build/
+*.spec
+
+.matplotlib-cache/
+
+.pyinstaller-cache/

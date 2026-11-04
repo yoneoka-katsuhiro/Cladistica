@@ -1,0 +1,14 @@
+# Python 3.12 native release builds. Keep pyproject ranges for library consumers.
+# Refresh deliberately and record actual versions in BUILD_INFO.json.
+biopython==1.88
+numpy==2.5.4
+openpyxl==3.1.5
+et_xmlfile==2.0.0
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.9
+altgraph==0.17.5
+packaging==26.3
+setuptools==84.2.1
+macholib==1.16.4; sys_platform == 'darwin'
+pefile==2024.8.26; sys_platform == 'win32'
+pywin32-ctypes==0.2.3; sys_platform == 'win32'

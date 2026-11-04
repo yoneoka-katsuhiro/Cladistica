@@ -1,0 +1,18 @@
+{
+  "dataset": "examples/tiny.fasta",
+  "synthetic": true,
+  "input_sha256": "1e18e73ed7962cd38d5ab0e52f765f668c28ddd0fb5fb7c1e41a2ab628a1b744",
+  "cladistica_version": "0.2.0",
+  "mrbayes_version": "3.2.7a",
+  "initial_generations": 2000,
+  "total_generations": 4000,
+  "sample_generations": [
+    0,
+    1000,
+    2000,
+    3000,
+    4000
+  ],
+  "created_at": "2026-11-04T15:06:59.199097+00:00",
+  "purpose": "Software demonstration only; no biological inference or convergence claim."
+}

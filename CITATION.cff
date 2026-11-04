@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "Please cite this software version and the data sources and external programs used in your analysis."
+type: software
+title: "Cladistica: plant marker phylogenetics with resumable Bayesian analyses"
+authors:
+  - family-names: Yoneoka
+    given-names: Katsuhiro
+    orcid: "https://orcid.org/0009-0000-4985-9340"
+version: 0.2.0
+date-released: 2026-11-05
+repository-code: "https://github.com/yoneoka-katsuhiro/Cladistica"
+url: "https://github.com/yoneoka-katsuhiro/Cladistica"
+license: MIT
